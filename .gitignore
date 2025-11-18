@@ -1,0 +1,39 @@
+# Python
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+
+# MicroPython
+*.mpy
+
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.elf
+*.bin
+*.map
+
+# ESP-IDF
+sdkconfig
+sdkconfig.old
+.config
+.config.old
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+csi_log.csv
+
+# OS
+.DS_Store
+Thumbs.db
