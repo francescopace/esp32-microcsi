@@ -3,7 +3,8 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2024 MicroPython CSI Module Contributors
+ * Copyright (c) 2025 Francesco Pace <francesco.pace@gmail.com>
+ * Copyright (c) 2025 MicroPython CSI Module Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -110,6 +111,9 @@ void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info);
 
 // MicroPython object type
 extern const mp_obj_type_t wifi_csi_type;
+
+// CSI singleton instance
+extern const mp_obj_base_t wifi_csi_singleton;
 
 // MicroPython CSI object structure
 typedef struct _wifi_csi_obj_t {

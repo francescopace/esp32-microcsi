@@ -3,7 +3,8 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2024 MicroPython CSI Module Contributors
+ * Copyright (c) 2025 Francesco Pace <francesco.pace@gmail.com>
+ * Copyright (c) 2025 MicroPython CSI Module Contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +35,14 @@
 #include "esp_wifi.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
+
+// Define STATIC if not already defined
+#ifndef STATIC
+#define STATIC static
+#endif
 
 static const char *TAG = "wifi_csi";
 
@@ -99,10 +107,6 @@ static void csi_buffer_deinit(csi_buffer_t *buf) {
 
 static bool csi_buffer_is_empty(const csi_buffer_t *buf) {
     return buf->head == buf->tail;
-}
-
-static bool csi_buffer_is_full(const csi_buffer_t *buf) {
-    return ((buf->head + 1) % buf->size) == buf->tail;
 }
 
 // Called from ISR context - must be fast and non-blocking
@@ -211,18 +215,104 @@ void wifi_csi_deinit(void) {
 }
 
 esp_err_t wifi_csi_enable(void) {
+    ESP_LOGI(TAG, "=== wifi_csi_enable() called ===");
+    
     if (g_csi_state.enabled) {
+        ESP_LOGI(TAG, "CSI already enabled, returning");
         return ESP_OK;
     }
 
+    // Check if WiFi is initialized
+    ESP_LOGI(TAG, "Checking WiFi state...");
+    wifi_mode_t mode;
+    esp_err_t ret = esp_wifi_get_mode(&mode);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get WiFi mode: 0x%x", ret);
+        return ret;
+    }
+    if (mode == WIFI_MODE_NULL) {
+        ESP_LOGE(TAG, "WiFi not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGI(TAG, "WiFi mode: %d", mode);
+    
+    // Ensure WiFi is started (MicroPython should have done this, but verify)
+    // Try to start WiFi - will return ESP_OK if already started
+    ret = esp_wifi_start();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi started successfully (or already started)");
+    } else {
+        ESP_LOGW(TAG, "WiFi start returned: 0x%x", ret);
+    }
+    
+    // Check if WiFi is connected (CSI may require WiFi connection)
+    // In the working example, CSI is initialized AFTER WiFi connection
+    wifi_ap_record_t ap_info;
+    ret = esp_wifi_sta_get_ap_info(&ap_info);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi connected to: %s (RSSI: %d)", ap_info.ssid, ap_info.rssi);
+    } else {
+        ESP_LOGW(TAG, "WiFi not connected (error: 0x%x). CSI may require WiFi connection.", ret);
+        ESP_LOGW(TAG, "Try connecting to a WiFi network first: wlan.connect('SSID', 'password')");
+        // Don't fail here - let esp_wifi_set_csi_config tell us if connection is required
+    }
+    
+    // Configure WiFi for CSI operation (critical for ESP32-S3)
+    // These settings are required before enabling CSI
+    
+    // 1. Disable power save mode (required for real-time CSI)
+    ESP_LOGI(TAG, "Disabling WiFi power save mode...");
+    ret = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to disable power save: 0x%x", ret);
+    }
+    
+    // 2. Set WiFi protocol (802.11b/g/n)
+    ESP_LOGI(TAG, "Setting WiFi protocol to 802.11b/g/n...");
+    ret = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set WiFi protocol: 0x%x", ret);
+    }
+    
+    // 3. Set WiFi bandwidth to HT20 (20MHz)
+    ESP_LOGI(TAG, "Setting WiFi bandwidth to HT20...");
+    ret = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set WiFi bandwidth: 0x%x", ret);
+    }
+    
+    // Longer delay to ensure WiFi is fully ready (as in working example)
+    // The working example waits for WiFi connection before initializing CSI
+    ESP_LOGI(TAG, "Waiting for WiFi to be ready...");
+    vTaskDelay(pdMS_TO_TICKS(500));  // Increased delay
+
     // Ensure buffer is initialized
+    ESP_LOGI(TAG, "Initializing buffer...");
     if (!g_csi_state.buffer.initialized) {
+        ESP_LOGI(TAG, "Buffer not initialized, creating buffer of size %lu", 
+                 (unsigned long)g_csi_state.config.buffer_size);
         if (!csi_buffer_init(&g_csi_state.buffer, g_csi_state.config.buffer_size)) {
+            ESP_LOGE(TAG, "Failed to initialize buffer");
             return ESP_ERR_NO_MEM;
         }
+        ESP_LOGI(TAG, "Buffer initialized successfully");
+    } else {
+        ESP_LOGI(TAG, "Buffer already initialized");
     }
 
-    // Configure CSI
+    // CRITICAL: Promiscuous mode MUST be enabled BEFORE configuring CSI
+    // This is required for ESP32-S3 (and ESP32-C6) for CSI to work properly
+    // Reference: Working ESPectre project
+    
+    // Step 1: Enable promiscuous mode FIRST (even if false, must be set before CSI config)
+    ESP_LOGI(TAG, "Setting promiscuous mode to false (CSI from connected AP only)...");
+    ret = esp_wifi_set_promiscuous(false);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set promiscuous mode: 0x%x (continuing anyway)", ret);
+    }
+    
+    // Step 2: Configure CSI (AFTER promiscuous mode is set)
     wifi_csi_config_t csi_config = {
         .lltf_en = g_csi_state.config.lltf_en,
         .htltf_en = g_csi_state.config.htltf_en,
@@ -231,25 +321,34 @@ esp_err_t wifi_csi_enable(void) {
         .channel_filter_en = g_csi_state.config.channel_filter_en,
         .manu_scale = g_csi_state.config.manu_scale,
         .shift = g_csi_state.config.shift,
+        .dump_ack_en = false,  // Default false
     };
 
-    esp_err_t ret = esp_wifi_set_csi_config(&csi_config);
+    ESP_LOGI(TAG, "Setting CSI config: lltf=%d, htltf=%d, stbc_htltf2=%d, ltf_merge=%d, channel_filter=%d, manu_scale=%d, shift=%d, dump_ack=%d",
+             csi_config.lltf_en, csi_config.htltf_en, csi_config.stbc_htltf2_en,
+             csi_config.ltf_merge_en, csi_config.channel_filter_en,
+             csi_config.manu_scale, csi_config.shift, csi_config.dump_ack_en);
+
+    ret = esp_wifi_set_csi_config(&csi_config);
+    
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set CSI config: %d", ret);
+        ESP_LOGE(TAG, "Failed to set CSI config: 0x%x", ret);
         return ret;
     }
+    
+    ESP_LOGI(TAG, "CSI config set successfully");
 
-    // Register callback
+    // Step 3: Register callback
     ret = esp_wifi_set_csi_rx_cb(wifi_csi_rx_cb, NULL);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set CSI callback: %d", ret);
+        ESP_LOGE(TAG, "Failed to set CSI callback: 0x%x", ret);
         return ret;
     }
 
-    // Enable CSI
+    // Step 4: Enable CSI
     ret = esp_wifi_set_csi(true);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to enable CSI: %d", ret);
+        ESP_LOGE(TAG, "Failed to enable CSI: 0x%x", ret);
         return ret;
     }
 
@@ -268,6 +367,10 @@ esp_err_t wifi_csi_disable(void) {
         ESP_LOGE(TAG, "Failed to disable CSI: %d", ret);
         return ret;
     }
+
+    // Disable promiscuous mode (optional - may be used by other parts of the system)
+    // Only disable if we're sure nothing else needs it
+    // esp_wifi_set_promiscuous(false);
 
     g_csi_state.enabled = false;
     ESP_LOGI(TAG, "CSI disabled");
@@ -463,5 +566,8 @@ MP_DEFINE_CONST_OBJ_TYPE(
     MP_TYPE_FLAG_NONE,
     locals_dict, &wifi_csi_locals_dict
 );
+
+// CSI singleton instance
+const mp_obj_base_t wifi_csi_singleton = { &wifi_csi_type };
 
 #endif // MICROPY_PY_NETWORK_WLAN_CSI

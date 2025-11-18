@@ -2,12 +2,185 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform: ESP32](https://img.shields.io/badge/Platform-ESP32-blue.svg)](https://www.espressif.com/en/products/socs/esp32)
-[![MicroPython](https://img.shields.io/badge/MicroPython-1.20+-green.svg)](https://micropython.org/)
-[![Status: WIP](https://img.shields.io/badge/Status-Work%20in%20Progress-orange.svg)](https://github.com)
-
-> **⚠️ Work in Progress**: This module is currently under active development. The API and implementation may change. Not yet tested on real hardware.
+[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.4.2-blue.svg)](https://github.com/espressif/esp-idf)
+[![MicroPython](https://img.shields.io/badge/MicroPython-v1.26.1-green.svg)](https://micropython.org/)
 
 Native MicroPython module for ESP32 that exposes ESP-IDF CSI (Channel State Information) functionality.
+
+## Requirements
+
+- **ESP-IDF**: v5.4.2
+- **MicroPython**: v1.26.1
+- **Tested Chips**: ESP32-S3
+
+## Project Structure
+
+```
+ESP32-MicroCSI/
+├── src/                    # Source files
+│   ├── modwifi_csi.c      # CSI module implementation
+│   └── modwifi_csi.h      # CSI module header
+├── scripts/                # Build and integration scripts
+│   ├── setup_env.sh       # Environment setup script
+│   ├── integrate_csi.sh   # CSI integration script
+│   ├── build_flash.sh     # Build and flash script
+│   └── run_example.sh     # Run examples with WiFi credentials
+├── examples/               # Example Python scripts
+│   ├── example_csi_basic.py      # Basic CSI capture and display
+│   └── example_csi_analysis.py   # Advanced analysis with statistics
+├── build/                  # Build artifacts (generated, not in repo)
+│   ├── esp-idf/           # ESP-IDF v5.4.2 framework
+│   ├── micropython/       # MicroPython v1.26.1 source
+│   └── firmware/          # Compiled firmware binaries
+├── .gitignore
+├── README.md
+└── LICENSE
+```
+
+**Note**: The `build/` directory is created by `setup_env.sh` and contains ~2-3 GB of downloaded dependencies.
+
+## Quick Start
+
+This project includes automated scripts to build and flash MicroPython with CSI support on your ESP32 device.
+
+### 1. Setup Environment
+
+Install ESP-IDF v5.4.2 and MicroPython v1.26.1:
+
+```bash
+./scripts/setup_env.sh
+```
+
+This script will:
+- Install required tools (cmake, ninja, dfu-util)
+- Install Python packages (pyserial, esptool, ampy)
+- Clone ESP-IDF v5.4.2 in `build/esp-idf/`
+- Clone MicroPython v1.26.1 in `build/micropython/`
+- Build mpy-cross compiler
+- Install ESP32-S3 toolchain
+
+**Time**: ~15-20 minutes (first run, downloads ~2-3 GB)
+
+### 2. Integrate CSI Module
+
+Patch MicroPython source with CSI module:
+
+```bash
+./scripts/integrate_csi.sh
+```
+
+This script will:
+- Reset MicroPython files to clean state (git reset)
+- Copy `src/modwifi_csi.c` and `src/modwifi_csi.h` to MicroPython `ports/esp32/`
+- Update `mpconfigport.h` with CSI configuration flag
+- Update `esp32_common.cmake` to include modwifi_csi.c
+- Patch `network_wlan.c` to expose `wlan.csi` attribute
+- Enable CSI in `sdkconfig.board` for ESP32-S3
+
+**Note:** The script resets the MicroPython repository to ensure a clean integration.
+
+### 3. Build and Flash
+
+Compile MicroPython firmware and flash to ESP32-S3:
+
+```bash
+./scripts/build_flash.sh
+```
+
+This script will:
+- Source ESP-IDF environment
+- Clean previous build
+- Configure for ESP32-S3
+- Build firmware (~15-20 minutes first time, ~2-3 minutes incremental)
+- Detect ESP32-S3 USB port
+- Flash bootloader, partition table, and firmware
+
+**Note**: If flashing fails, put ESP32-S3 in download mode:
+1. Hold BOOT button
+2. Press and release RESET button
+3. Release BOOT button
+4. Run `./scripts/build_flash.sh` again
+
+### 4. Run CSI Examples
+
+The easiest way to test CSI functionality is using the provided example scripts:
+
+```bash
+./scripts/run_example.sh <SSID> <PASSWORD>
+```
+
+Example:
+```bash
+./scripts/run_example.sh MyWiFi MyPassword
+```
+
+This will:
+- Create a temporary `wifi_config.py` with your credentials
+- Upload it to the ESP32 via `mpremote`
+- Run the CSI analysis example
+- Display real-time CSI data with statistics
+
+**Available examples:**
+- `example_csi_basic.py` - Basic CSI capture and display
+  - Shows RSSI, rate, MCS, MAC address, timestamp
+  - Displays buffer status (available/dropped frames)
+  - Simple frame-by-frame output
+
+- `example_csi_analysis.py` - Advanced analysis with statistics
+  - Calculates amplitude from complex I/Q data
+  - Extracts phase information using `atan2`
+  - Computes statistical measures (mean, max, min, std deviation)
+  - Logs data to CSV file (`csi_log.csv`)
+  - Shows throughput (frames/sec)
+  - Detailed analysis every 10 frames
+
+To switch between examples, edit `scripts/run_example.sh` and change the `SCRIPT` variable.
+
+### Alternative: Manual REPL Testing
+
+You can also connect to REPL manually using one of these methods:
+
+**Option 1: Using screen (simplest)**
+```bash
+screen /dev/cu.usbmodem* 115200
+```
+(Press Ctrl-A then K to exit)
+
+**Option 2: Using build script with monitor flag**
+```bash
+./scripts/build_flash.sh --monitor
+```
+
+Then in Python REPL:
+```python
+import network
+wlan = network.WLAN(network.STA_IF)
+wlan.active(True)
+print(hasattr(wlan, 'csi'))  # Should print True
+```
+
+### Troubleshooting Setup
+
+**ESP-IDF environment error:**
+```bash
+# Clean ESP-IDF Python environment
+rm -rf ~/.espressif/python_env
+
+# Reinstall
+rm -rf build
+./scripts/setup_env.sh
+```
+
+**Build errors:**
+```bash
+# Clean build directory
+cd build/micropython/ports/esp32
+make BOARD=ESP32_GENERIC_S3 clean
+
+# Rebuild
+cd /path/to/ESP32-MicroCSI
+./scripts/build_flash.sh
+```
 
 ## Features
 
@@ -28,24 +201,40 @@ The module uses a pre-allocated circular buffer to store received CSI frames:
 - **Lock-free**: Safe for concurrent ISR/Python access
 - **Zero allocations**: Everything pre-allocated at initialization
 - **Dropped counter**: Tracks frames lost when buffer is full
+- **Memory efficient**: ~750 bytes per frame
 
 ### ISR Callback
 
 The C callback (`wifi_csi_rx_cb`) runs in interrupt context:
 
-- Fast copy of data to circular buffer
+- Fast copy of data to circular buffer (< 100 µs per frame)
 - No Python function calls
 - Marked with `IRAM_ATTR` for RAM execution
 - Atomic head/tail index management
+- No dynamic memory allocation
+
+### CSI Enable Sequence (Critical for ESP32-S3)
+
+The `wifi_csi_enable()` function follows a specific sequence:
+
+1. **Verify WiFi state** - Check WiFi is initialized and started
+2. **Disable power save** - Set `WIFI_PS_NONE` for real-time CSI
+3. **Set WiFi protocol** - Configure 802.11b/g/n
+4. **Set bandwidth** - Configure HT20 (20MHz)
+6. **Configure CSI** - Set LTF parameters and filters
+7. **Register callback** - Set ISR callback function
+8. **Enable CSI** - Activate CSI capture
+
 
 ### Frame Structure
 
 Each CSI frame contains:
 
-- **Metadata**: RSSI, rate, MCS, bandwidth, etc.
+- **Metadata**: RSSI, rate, MCS, bandwidth, channel, etc.
 - **MAC address**: Source address (6 bytes)
 - **Timestamp**: Microseconds (local and ESP-IDF)
-- **CSI data**: Array of complex values (max 384 elements)
+- **CSI data**: Array of complex I/Q values (max 384 elements)
+- **Statistics**: Noise floor, AMPDU count, signal length
 
 ## Python API
 
@@ -87,23 +276,26 @@ wlan.csi.disable()
 frame = wlan.csi.read()
 
 if frame:
-    print(f"RSSI: {frame['rssi']} dBm")
-    print(f"Rate: {frame['rate']}")
-    print(f"MCS: {frame['mcs']}")
-    print(f"Channel: {frame['channel']}")
-    print(f"MAC: {frame['mac'].hex(':')}")
-    print(f"Timestamp: {frame['timestamp']} µs")
+    # Format MAC address manually (MicroPython compatible)
+    mac_str = ':'.join('%02x' % b for b in frame['mac'])
+    
+    print("RSSI: " + str(frame['rssi']) + " dBm")
+    print("Rate: " + str(frame['rate']))
+    print("MCS: " + str(frame['mcs']))
+    print("Channel: " + str(frame['channel']))
+    print("MAC: " + mac_str)
+    print("Timestamp: " + str(frame['timestamp']) + " µs")
     
     # CSI data as array('h')
     csi_data = frame['data']
-    print(f"CSI length: {len(csi_data)}")
+    print("CSI length: " + str(len(csi_data)))
     
     # Access complex values (I, Q alternating)
     for i in range(0, len(csi_data), 2):
         real = csi_data[i]
         imag = csi_data[i+1] if i+1 < len(csi_data) else 0
         magnitude = (real**2 + imag**2)**0.5
-        print(f"Subcarrier {i//2}: {magnitude:.2f}")
+        print("Subcarrier %d: %.2f" % (i//2, magnitude))
 ```
 
 ### Statistics
@@ -111,11 +303,11 @@ if frame:
 ```python
 # Number of frames available in buffer
 available = wlan.csi.available()
-print(f"Frames available: {available}")
+print("Frames available: " + str(available))
 
 # Number of dropped frames (buffer full)
 dropped = wlan.csi.dropped()
-print(f"Frames dropped: {dropped}")
+print("Frames dropped: " + str(dropped))
 ```
 
 ## CSI Frame Fields
@@ -148,6 +340,10 @@ Each CSI frame is a dictionary with the following fields:
 
 ## Complete Example
 
+See `examples/example_csi_basic.py` and `examples/example_csi_analysis.py` for complete working examples.
+
+**Basic example:**
+
 ```python
 import network
 import time
@@ -155,6 +351,11 @@ import time
 # Initialize WiFi
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
+
+# Connect to WiFi (REQUIRED for CSI)
+wlan.connect("YourSSID", "YourPassword")
+while not wlan.isconnected():
+    time.sleep(0.5)
 
 # Configure CSI
 wlan.csi.config(
@@ -166,17 +367,15 @@ wlan.csi.config(
 
 # Enable CSI
 wlan.csi.enable()
-print("CSI enabled")
 
 # Reading loop
 try:
     while True:
         frame = wlan.csi.read()
         if frame:
-            print(f"RSSI: {frame['rssi']:3d} dBm | "
-                  f"Rate: {frame['rate']:2d} | "
-                  f"MCS: {frame['mcs']:2d} | "
-                  f"MAC: {frame['mac'].hex(':')}")
+            mac_str = ':'.join('%02x' % b for b in frame['mac'])
+            print("RSSI: %3d dBm | Rate: %2d | MCS: %2d | MAC: %s" % 
+                  (frame['rssi'], frame['rate'], frame['mcs'], mac_str))
         else:
             time.sleep(0.01)  # Wait if buffer empty
             
@@ -186,98 +385,14 @@ except KeyboardInterrupt:
 finally:
     # Disable CSI
     wlan.csi.disable()
-    print(f"Dropped frames: {wlan.csi.dropped()}")
+    print("Dropped frames: " + str(wlan.csi.dropped()))
 ```
 
-## Integration into ESP32 Port
-
-### 1. Copy Files
-
-Copy the following files to `ports/esp32/` directory:
-
-- `modwifi_csi.c`
-- `modwifi_csi.h`
-
-### 2. Modify `mpconfigport.h`
-
-Add the following configuration:
-
-```c
-// WiFi CSI support
-#ifndef MICROPY_PY_NETWORK_WLAN_CSI
-#define MICROPY_PY_NETWORK_WLAN_CSI (1)
-#endif
-```
-
-### 3. Modify `Makefile` or `CMakeLists.txt`
-
-**For Makefile:**
-
-```makefile
-ifeq ($(MICROPY_PY_NETWORK_WLAN_CSI),1)
-SRC_C += modwifi_csi.c
-endif
-```
-
-**For CMake:**
-
-```cmake
-option(MICROPY_PY_NETWORK_WLAN_CSI "Enable WiFi CSI support" ON)
-
-if(MICROPY_PY_NETWORK_WLAN_CSI)
-    list(APPEND MICROPY_SOURCE_PORT modwifi_csi.c)
-    target_compile_definitions(${MICROPY_TARGET} PUBLIC
-        MICROPY_PY_NETWORK_WLAN_CSI=1
-    )
-endif()
-```
-
-### 4. Modify `modnetwork.c`
-
-Add the include:
-
-```c
-#if MICROPY_PY_NETWORK_WLAN_CSI
-#include "modwifi_csi.h"
-#endif
-```
-
-In the WLAN object locals dictionary:
-
-```c
-#if MICROPY_PY_NETWORK_WLAN_CSI
-    { MP_ROM_QSTR(MP_QSTR_csi), MP_ROM_PTR(&wifi_csi_type) },
-#endif
-```
-
-In the WLAN init function:
-
-```c
-#if MICROPY_PY_NETWORK_WLAN_CSI
-    wifi_csi_init();
-#endif
-```
-
-In the WLAN deinit function:
-
-```c
-#if MICROPY_PY_NETWORK_WLAN_CSI
-    wifi_csi_deinit();
-#endif
-```
-
-### 5. Build
+**Quick start with provided scripts:**
 
 ```bash
-cd ports/esp32
-make clean
-make
-```
-
-To disable CSI:
-
-```bash
-make MICROPY_PY_NETWORK_WLAN_CSI=0
+# Run the example with your WiFi credentials
+./scripts/run_example.sh YourSSID YourPassword
 ```
 
 ## Technical Notes
@@ -303,29 +418,84 @@ Each frame occupies approximately 750 bytes in memory.
 
 - **Memory**: Pre-allocated buffer, not resizable at runtime
 - **Concurrency**: Single Python reader supported
-- **ESP-IDF**: Requires ESP-IDF v4.0 or higher
 - **WiFi**: Must be in STA or AP+STA mode
+
+## Important Notes
+
+### ESP32-S3 Specific Requirements
+
+- **WiFi Connection Required**: CSI requires an active WiFi connection. Connect to an AP before enabling CSI.
+- **Power Save**: Automatically disabled for real-time CSI capture
+- **Protocol**: Set to 802.11b/g/n for CSI compatibility
+- **Bandwidth**: Configured to HT20 (20MHz) by default
+
+### CSI Data Format
+
+- CSI data is returned as `array('h')` containing alternating I/Q values
+- Each subcarrier has 2 values: real (I) and imaginary (Q)
+- Maximum 384 values (192 subcarriers for HT40)
+- Calculate amplitude: `sqrt(I² + Q²)`
+- Calculate phase: `atan2(Q, I)`
 
 ## Troubleshooting
 
 ### CSI not receiving frames
 
-1. Verify WiFi is active: `wlan.active(True)`
-2. Verify CSI is enabled: `wlan.csi.enable()`
-3. Verify there is WiFi traffic in the area
-4. Check ESP-IDF logs for errors
+**Symptoms**: `wlan.csi.read()` always returns `None`
+
+**Solutions**:
+1. **Verify WiFi connection**: CSI requires active WiFi connection
+   ```python
+   print(wlan.isconnected())  # Should be True
+   ```
+2. Verify WiFi is active: `wlan.active(True)`
+3. Verify CSI is enabled: `wlan.csi.enable()`
+4. Check there is WiFi traffic in the area (other devices transmitting)
+5. Try connecting to a busy WiFi network
+6. Check ESP-IDF logs for errors (use `--monitor` flag)
 
 ### Buffer full (dropped frames)
 
-1. Increase `buffer_size` in `config()`
-2. Read frames more frequently
-3. Reduce per-frame processing
+**Symptoms**: `wlan.csi.dropped()` returns high numbers
+
+**Solutions**:
+1. Increase `buffer_size` in `config()` (e.g., 256 or 512)
+2. Read frames more frequently in your loop
+3. Reduce per-frame processing time
+4. Consider processing frames in batches
 
 ### Compilation errors
 
-1. Verify ESP-IDF version (>= v4.0)
-2. Verify `MICROPY_PY_NETWORK_WLAN_CSI=1`
-3. Check files are in correct directory
+**Error**: `modwifi_csi.c: No such file or directory`
+
+**Solution**: Run `./scripts/integrate_csi.sh` before building
+
+**Error**: `MICROPY_PY_NETWORK_WLAN_CSI undeclared`
+
+**Solution**: Verify integration script completed successfully
+
+**Error**: ESP-IDF version mismatch
+
+**Solution**: 
+```bash
+rm -rf build
+./scripts/setup_env.sh
+./scripts/integrate_csi.sh
+./scripts/build_flash.sh
+```
+
+### Flash errors
+
+**Error**: `Failed to connect to ESP32`
+
+**Solution**: Put device in download mode (hold BOOT, press RESET, release BOOT)
+
+**Error**: Port not detected
+
+**Solution**: Check USB cable and try different port. List available ports:
+```bash
+ls -la /dev/cu.*
+```
 
 ## License
 

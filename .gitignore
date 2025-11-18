@@ -22,6 +22,12 @@ sdkconfig
 sdkconfig.old
 .config
 .config.old
+esp-idf/
+.espressif/
+
+# MicroPython build
+micropython/
+firmware/
 
 # IDE
 .vscode/
@@ -37,3 +43,6 @@ csi_log.csv
 # OS
 .DS_Store
 Thumbs.db
+
+# Other
+examples/wifi_config.py

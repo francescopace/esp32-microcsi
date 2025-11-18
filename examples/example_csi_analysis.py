@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2024 ESP32-MicroCSI Contributors
+# SPDX-License-Identifier: MIT
+
 """
 MicroPython ESP32 CSI Module - Advanced Analysis Example
 
@@ -11,6 +14,14 @@ This example demonstrates CSI data analysis including:
 import network
 import time
 import math
+
+# Import WiFi credentials
+try:
+    from wifi_config import WIFI_SSID, WIFI_PASSWORD
+except ImportError:
+    print("Error: wifi_config.py not found!")
+    print("Please run this script using: ./scripts/run_example.sh <SSID> <PASSWORD>")
+    raise
 
 def calculate_amplitude(csi_data):
     """Calculate amplitude from complex CSI data (I, Q pairs)"""
@@ -63,33 +74,52 @@ def log_to_file(filename, frame, analysis):
     """Log frame data to file"""
     try:
         with open(filename, 'a') as f:
-            f.write(f"{frame['timestamp']},{frame['rssi']},{frame['rate']},")
-            f.write(f"{frame['mcs']},{frame['channel']},{frame['mac'].hex(':')},")
-            f.write(f"{analysis['avg']:.2f},{analysis['max']:.2f},")
-            f.write(f"{analysis['min']:.2f},{analysis['std']:.2f}\n")
+            mac_str = ':'.join('%02x' % b for b in frame['mac'])
+            f.write(str(frame['timestamp']) + "," + str(frame['rssi']) + "," + str(frame['rate']) + ",")
+            f.write(str(frame['mcs']) + "," + str(frame['channel']) + "," + mac_str + ",")
+            f.write("%.2f,%.2f," % (analysis['avg'], analysis['max']))
+            f.write("%.2f,%.2f\n" % (analysis['min'], analysis['std']))
     except Exception as e:
-        print(f"Error logging to file: {e}")
+        print("Error logging to file: " + str(e))
 
 def main():
-    # Initialize WiFi
+    # Initialize WiFi in station mode
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     
-    print("=" * 60)
-    print("MicroPython ESP32 CSI - Advanced Analysis")
-    print("=" * 60)
-    print(f"MAC address: {wlan.config('mac').hex(':')}")
+    print("WiFi initialized")
+    mac = wlan.config('mac')
+    print("MAC address: " + ':'.join('%02x' % b for b in mac))
+    
+    # Connect to WiFi (REQUIRED for CSI)
+    print("Connecting to WiFi...")
+    wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+    
+    # Wait for connection
+    timeout = 10
+    while not wlan.isconnected() and timeout > 0:
+        time.sleep(0.5)
+        timeout -= 0.5
+    
+    if not wlan.isconnected():
+        print("ERROR: Failed to connect to WiFi!")
+        print("CSI requires WiFi connection to work.")
+        return
+    
+    print("WiFi connected to: " + WIFI_SSID)
+    print("IP: " + wlan.ifconfig()[0])
     print()
     
-    # Configure CSI
+    # Configure CSI with default settings
     wlan.csi.config(
         lltf_en=True,
         htltf_en=True,
         stbc_htltf2_en=True,
         ltf_merge_en=True,
         channel_filter_en=True,
-        buffer_size=128
+        buffer_size=64
     )
+    print("CSI configured")
     
     # Enable CSI
     wlan.csi.enable()
@@ -101,9 +131,9 @@ def main():
     try:
         with open(log_filename, 'w') as f:
             f.write("timestamp,rssi,rate,mcs,channel,mac,avg_amp,max_amp,min_amp,std_dev\n")
-        print(f"Logging to: {log_filename}")
+        print("Logging to: " + log_filename)
     except Exception as e:
-        print(f"Warning: Could not create log file: {e}")
+        print("Warning: Could not create log file: " + str(e))
         log_filename = None
     
     print()
@@ -125,12 +155,9 @@ def main():
                 
                 if analysis:
                     # Display analysis
-                    print(f"Frame #{frame_count:4d} | "
-                          f"RSSI: {frame['rssi']:3d} dBm | "
-                          f"MCS: {frame['mcs']:2d} | "
-                          f"Subcarriers: {analysis['subcarriers']:3d} | "
-                          f"Avg: {analysis['avg']:6.2f} | "
-                          f"Std: {analysis['std']:6.2f}")
+                    print("Frame #%4d | RSSI: %3d dBm | MCS: %2d | Subcarriers: %3d | Avg: %6.2f | Std: %6.2f" % 
+                          (frame_count, frame['rssi'], frame['mcs'], analysis['subcarriers'], 
+                           analysis['avg'], analysis['std']))
                     
                     # Log to file
                     if log_filename:
@@ -139,29 +166,29 @@ def main():
                     # Show detailed analysis every 10 frames
                     if frame_count % 10 == 0:
                         print()
-                        print(f"  Detailed Analysis (Frame #{frame_count}):")
-                        print(f"    Average Amplitude: {analysis['avg']:.2f}")
-                        print(f"    Max Amplitude:     {analysis['max']:.2f}")
-                        print(f"    Min Amplitude:     {analysis['min']:.2f}")
-                        print(f"    Std Deviation:     {analysis['std']:.2f}")
-                        print(f"    Subcarriers:       {analysis['subcarriers']}")
+                        print("  Detailed Analysis (Frame #" + str(frame_count) + "):")
+                        print("    Average Amplitude: %.2f" % analysis['avg'])
+                        print("    Max Amplitude:     %.2f" % analysis['max'])
+                        print("    Min Amplitude:     %.2f" % analysis['min'])
+                        print("    Std Deviation:     %.2f" % analysis['std'])
+                        print("    Subcarriers:       " + str(analysis['subcarriers']))
                         
                         # Calculate and show phases for first few subcarriers
                         phases = calculate_phase(frame['data'][:10])
-                        print(f"    First 5 phases:    ", end="")
+                        print("    First 5 phases:    ", end="")
                         for i, phase in enumerate(phases[:5]):
-                            print(f"{phase:6.3f} ", end="")
+                            print("%6.3f " % phase, end="")
                         print()
                         
                         # Buffer statistics
                         available = wlan.csi.available()
                         dropped = wlan.csi.dropped()
-                        print(f"    Buffer status:     {available} available, {dropped} dropped")
+                        print("    Buffer status:     " + str(available) + " available, " + str(dropped) + " dropped")
                         
                         # Throughput
                         elapsed = time.ticks_diff(time.ticks_ms(), start_time) / 1000.0
                         fps = frame_count / elapsed if elapsed > 0 else 0
-                        print(f"    Throughput:        {fps:.1f} frames/sec")
+                        print("    Throughput:        %.1f frames/sec" % fps)
                         print()
             else:
                 # No frame available
@@ -181,13 +208,13 @@ def main():
         print("=" * 60)
         print("Final Statistics:")
         print("=" * 60)
-        print(f"Total frames captured: {frame_count}")
-        print(f"Total frames dropped:  {wlan.csi.dropped()}")
-        print(f"Elapsed time:          {elapsed:.2f} seconds")
+        print("Total frames captured: " + str(frame_count))
+        print("Total frames dropped:  " + str(wlan.csi.dropped()))
+        print("Elapsed time:          %.2f seconds" % elapsed)
         if elapsed > 0:
-            print(f"Average throughput:    {frame_count/elapsed:.2f} frames/sec")
+            print("Average throughput:    %.2f frames/sec" % (frame_count/elapsed))
         if log_filename:
-            print(f"Data logged to:        {log_filename}")
+            print("Data logged to:        " + log_filename)
         print("=" * 60)
         print("CSI disabled")
 
