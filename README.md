@@ -1,4 +1,9 @@
-# MicroPython ESP32 CSI Module
+# ESP32-MicroCSI - A MicroPython ESP32 CSI Module
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Platform: ESP32](https://img.shields.io/badge/Platform-ESP32-blue.svg)](https://www.espressif.com/en/products/socs/esp32)
+[![MicroPython](https://img.shields.io/badge/MicroPython-1.20+-green.svg)](https://micropython.org/)
+[![Status: WIP](https://img.shields.io/badge/Status-Work%20in%20Progress-orange.svg)](https://github.com)
 
 > **⚠️ Work in Progress**: This module is currently under active development. The API and implementation may change. Not yet tested on real hardware.
 
@@ -335,3 +340,11 @@ This module was developed for the MicroPython ESP32 port following project best 
 - [ESP-IDF CSI Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/wifi.html#wi-fi-channel-state-information)
 - [MicroPython ESP32 Port](https://github.com/micropython/micropython/tree/master/ports/esp32)
 - [IEEE 802.11 CSI](https://en.wikipedia.org/wiki/Channel_state_information)
+
+
+## 👤 Author
+
+**Francesco Pace**  
+📧 Email: [francesco.pace@gmail.com](mailto:francesco.pace@gmail.com)  
+💼 LinkedIn: [linkedin.com/in/francescopace](https://www.linkedin.com/in/francescopace/)  
+🛜 Project: [ESPectre](https://github.com/francescopace/esp32-microcsi)
