@@ -11,7 +11,8 @@ Native MicroPython module for ESP32 that exposes ESP-IDF CSI (Channel State Info
 
 - **ESP-IDF**: v5.4.2
 - **MicroPython**: v1.26.1
-- **Tested Chips**: ESP32-S3
+- **Supported Chips**: ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6
+- **Tested Chips**: ESP32-S3, ESP32-C6
 
 ## Project Structure
 
@@ -57,7 +58,7 @@ This script will:
 - Clone ESP-IDF v5.4.2 in `build/esp-idf/`
 - Clone MicroPython v1.26.1 in `build/micropython/`
 - Build mpy-cross compiler
-- Install ESP32-S3 toolchain
+- Install toolchains for all supported ESP32 chips
 
 **Time**: ~15-20 minutes (first run, downloads ~2-3 GB)
 
@@ -71,20 +72,44 @@ Patch MicroPython source with CSI module:
 
 This script will:
 - Reset MicroPython files to clean state (git reset)
+- Initialize required git submodules (lib/berkeley-db-1.xx, lib/micropython-lib)
 - Copy `src/modwifi_csi.c` and `src/modwifi_csi.h` to MicroPython `ports/esp32/`
 - Update `mpconfigport.h` with CSI configuration flag
 - Update `esp32_common.cmake` to include modwifi_csi.c
 - Patch `network_wlan.c` to expose `wlan.csi` attribute
-- Enable CSI in `sdkconfig.board` for ESP32-S3
+- Enable CSI in `sdkconfig.board` for all supported boards
+- Add compiler optimizations to reduce firmware size for all boards
 
 **Note:** The script resets the MicroPython repository to ensure a clean integration.
 
+**Compiler Optimizations:**
+The integration script automatically modifies `boards/sdkconfig.base` to optimize for size:
+- Replaces `CONFIG_COMPILER_OPTIMIZATION_PERF=y` with `CONFIG_COMPILER_OPTIMIZATION_SIZE=y`
+- This changes compilation from `-O2` (performance) to `-Os` (size optimization)
+- Applied globally to **all ESP32 boards** (ESP32, S2, S3, C3, C6)
+
+These optimizations reduce firmware size by ~5-10% (50-100 KB), which is **critical for ESP32-C6** where the CSI module increases the binary size close to the partition limit.
+
+**Why modify sdkconfig.base?**
+- `sdkconfig.base` is processed first and has the highest priority in the configuration hierarchy
+- Individual board `sdkconfig.board` files cannot override settings from `sdkconfig.base`
+- By modifying the base configuration, we ensure size optimization is applied consistently across all boards
+
 ### 3. Build and Flash
 
-Compile MicroPython firmware and flash to ESP32-S3:
+Compile MicroPython firmware and flash to your ESP32 device:
 
 ```bash
 ./scripts/build_flash.sh
+```
+
+For other ESP32 chips, specify the board:
+
+```bash
+./scripts/build_flash.sh -b ESP32_GENERIC        # ESP32 classic
+./scripts/build_flash.sh -b ESP32_GENERIC_S2     # ESP32-S2
+./scripts/build_flash.sh -b ESP32_GENERIC_C3     # ESP32-C3
+./scripts/build_flash.sh -b ESP32_GENERIC_C6     # ESP32-C6 (WiFi 6)
 ```
 
 This script will:
@@ -92,10 +117,10 @@ This script will:
 - Clean previous build
 - Configure for ESP32-S3
 - Build firmware (~15-20 minutes first time, ~2-3 minutes incremental)
-- Detect ESP32-S3 USB port
+- Detect ESP32 USB port
 - Flash bootloader, partition table, and firmware
 
-**Note**: If flashing fails, put ESP32-S3 in download mode:
+**Note**: If flashing fails, put your ESP32 device in download mode:
 1. Hold BOOT button
 2. Press and release RESET button
 3. Release BOOT button
@@ -213,17 +238,23 @@ The C callback (`wifi_csi_rx_cb`) runs in interrupt context:
 - Atomic head/tail index management
 - No dynamic memory allocation
 
-### CSI Enable Sequence (Critical for ESP32-S3)
+### CSI Enable Sequence
 
-The `wifi_csi_enable()` function follows a specific sequence:
+The `wifi_csi_enable()` function follows a specific sequence that is **critical for all ESP32 chips**:
 
 1. **Verify WiFi state** - Check WiFi is initialized and started
 2. **Disable power save** - Set `WIFI_PS_NONE` for real-time CSI
-3. **Set WiFi protocol** - Configure 802.11b/g/n
+3. **Set WiFi protocol** - Configure 802.11b/g/n (ESP32-C6: also 802.11ax)
 4. **Set bandwidth** - Configure HT20 (20MHz)
-6. **Configure CSI** - Set LTF parameters and filters
+5. **Enable promiscuous mode** - **CRITICAL**: Must be set BEFORE CSI config (especially for ESP32-C6)
+6. **Configure CSI** - Set LTF parameters and filters (API differs between chips)
 7. **Register callback** - Set ISR callback function
 8. **Enable CSI** - Activate CSI capture
+
+**Important Notes:**
+- Step 5 (promiscuous mode) is **mandatory** even if set to `false`
+- The order of steps 5-6 is critical: promiscuous mode must be enabled before CSI configuration
+- ESP32-C6 uses a different CSI configuration API but the sequence remains the same
 
 
 ### Frame Structure
@@ -258,6 +289,13 @@ wlan.csi.config(
     buffer_size=128         # Buffer size (1-1024 frames)
 )
 ```
+
+**Note for ESP32-C6:**
+- LTF configuration parameters (`lltf_en`, `htltf_en`, etc.) are **accepted but ignored** on ESP32-C6
+- ESP32-C6 uses an optimized hardcoded configuration for best performance
+- A warning will be logged when calling `wlan.csi.enable()` on ESP32-C6
+- Only `buffer_size` parameter is respected on all chips
+- ESP32-C6 automatically acquires CSI from: Legacy (802.11a/g), HT20 (802.11n), and WiFi 6 SU (802.11ax) packets
 
 ### Enable/Disable
 
@@ -314,29 +352,33 @@ print("Frames dropped: " + str(dropped))
 
 Each CSI frame is a dictionary with the following fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `rssi` | `int` | RSSI in dBm |
-| `rate` | `int` | Data rate |
-| `sig_mode` | `int` | Signal mode (0=legacy, 1=HT, 3=VHT) |
-| `mcs` | `int` | MCS index |
-| `cwb` | `int` | Channel bandwidth (0=20MHz, 1=40MHz) |
-| `smoothing` | `int` | Smoothing applied |
-| `not_sounding` | `int` | Not sounding frame |
-| `aggregation` | `int` | Aggregation |
-| `stbc` | `int` | STBC |
-| `fec_coding` | `int` | FEC coding (0=BCC, 1=LDPC) |
-| `sgi` | `int` | Short GI |
-| `noise_floor` | `int` | Noise floor in dBm |
-| `ampdu_cnt` | `int` | AMPDU count |
-| `channel` | `int` | Primary channel |
-| `secondary_channel` | `int` | Secondary channel |
-| `timestamp` | `int` | Timestamp in microseconds |
-| `local_timestamp` | `int` | Local timestamp |
-| `ant` | `int` | Antenna |
-| `sig_len` | `int` | Signal length |
-| `mac` | `bytes` | Source MAC address (6 bytes) |
-| `data` | `array('h')` | CSI data (complex values) |
+| Field | Type | Description | ESP32/S2/S3/C3 | ESP32-C6 |
+|-------|------|-------------|----------------|----------|
+| `rssi` | `int` | RSSI in dBm | ✅ Available | ✅ Available |
+| `rate` | `int` | Data rate | ✅ Available | ✅ Available |
+| `sig_mode` | `int` | Signal mode (0=legacy, 1=HT, 3=VHT) | ✅ Available | ⚠️ Always 0 |
+| `mcs` | `int` | MCS index | ✅ Available | ⚠️ Always 0 |
+| `cwb` | `int` | Channel bandwidth (0=20MHz, 1=40MHz) | ✅ Available | ⚠️ Always 0 |
+| `smoothing` | `int` | Smoothing applied | ✅ Available | ⚠️ Always 0 |
+| `not_sounding` | `int` | Not sounding frame | ✅ Available | ⚠️ Always 0 |
+| `aggregation` | `int` | Aggregation | ✅ Available | ⚠️ Always 0 |
+| `stbc` | `int` | STBC | ✅ Available | ⚠️ Always 0 |
+| `fec_coding` | `int` | FEC coding (0=BCC, 1=LDPC) | ✅ Available | ⚠️ Always 0 |
+| `sgi` | `int` | Short GI | ✅ Available | ⚠️ Always 0 |
+| `noise_floor` | `int` | Noise floor in dBm | ✅ Available | ✅ Available |
+| `ampdu_cnt` | `int` | AMPDU count | ✅ Available | ⚠️ Always 0 |
+| `channel` | `int` | Primary channel | ✅ Available | ✅ Available |
+| `secondary_channel` | `int` | Secondary channel | ✅ Available | ⚠️ Always 0 |
+| `timestamp` | `int` | Timestamp in microseconds | ✅ Available | ✅ Available |
+| `local_timestamp` | `int` | Local timestamp | ✅ Available | ✅ Available |
+| `ant` | `int` | Antenna | ✅ Available | ⚠️ Always 0 |
+| `sig_len` | `int` | Signal length | ✅ Available | ✅ Available |
+| `mac` | `bytes` | Source MAC address (6 bytes) | ✅ Available | ✅ Available |
+| `data` | `array('h')` | CSI data (complex values) | ✅ Available | ✅ Available |
+
+**Chip Compatibility Notes:**
+- **ESP32, ESP32-S2, ESP32-S3, ESP32-C3**: All fields are available from the hardware
+- **ESP32-C6**: Due to hardware differences in the `esp_wifi_rxctrl_t` structure, many metadata fields are not available and are set to 0. This does not affect CSI data quality - the important fields (`rssi`, `rate`, `channel`, `noise_floor`, `timestamp`, `mac`, `data`) are fully available on all chips.
 
 ## Complete Example
 
@@ -422,11 +464,36 @@ Each frame occupies approximately 750 bytes in memory.
 
 ## Important Notes
 
-### ESP32-S3 Specific Requirements
+### Multi-Chip Support
+
+The module supports multiple ESP32 variants with automatic configuration:
+
+| Chip | Architecture | WiFi | CSI Support | Tested | Notes |
+|------|-------------|------|-------------|--------|-------|
+| **ESP32** | Xtensa dual-core | 802.11b/g/n | ✅ Yes | ⚠️ No | Classic ESP32 |
+| **ESP32-S2** | Xtensa single-core | 802.11b/g/n | ✅ Yes | ⚠️ No | Lower power |
+| **ESP32-S3** | Xtensa dual-core | 802.11b/g/n | ✅ Yes | ✅ Yes | Tested extensively |
+| **ESP32-C3** | RISC-V single-core | 802.11b/g/n | ✅ Yes | ⚠️ No | RISC-V architecture |
+| **ESP32-C6** | RISC-V single-core | 802.11ax (WiFi 6) | ✅ Yes | ✅ Yes | WiFi 6 support |
+
+**Key Points:**
+- All chips use the same Python API
+- CSI data format is consistent across all chips
+- ESP32-C6 supports WiFi 6 (802.11ax) but CSI works with all WiFi standards
+- `CSI_MAX_DATA_LEN` (384) is sufficient for all chips including WiFi 6
+- ESP32-C6 uses a different internal CSI API but this is handled automatically
+
+**ESP32-C6 Specific Notes:**
+- Uses newer CSI API with `acquire_csi_*` fields instead of `lltf_en`/`htltf_en`
+- Automatically enables WiFi 6 (802.11ax) protocol support
+- Configuration parameters (`lltf_en`, `htltf_en`, etc.) are accepted but use optimized defaults
+- CSI acquisition configured for: Legacy (802.11a/g), HT20 (802.11n), and WiFi 6 SU packets
+
+### General Requirements
 
 - **WiFi Connection Required**: CSI requires an active WiFi connection. Connect to an AP before enabling CSI.
 - **Power Save**: Automatically disabled for real-time CSI capture
-- **Protocol**: Set to 802.11b/g/n for CSI compatibility
+- **Protocol**: Set to 802.11b/g/n (ESP32-C6 also supports 802.11ax)
 - **Bandwidth**: Configured to HT20 (20MHz) by default
 
 ### CSI Data Format
@@ -436,66 +503,6 @@ Each frame occupies approximately 750 bytes in memory.
 - Maximum 384 values (192 subcarriers for HT40)
 - Calculate amplitude: `sqrt(I² + Q²)`
 - Calculate phase: `atan2(Q, I)`
-
-## Troubleshooting
-
-### CSI not receiving frames
-
-**Symptoms**: `wlan.csi.read()` always returns `None`
-
-**Solutions**:
-1. **Verify WiFi connection**: CSI requires active WiFi connection
-   ```python
-   print(wlan.isconnected())  # Should be True
-   ```
-2. Verify WiFi is active: `wlan.active(True)`
-3. Verify CSI is enabled: `wlan.csi.enable()`
-4. Check there is WiFi traffic in the area (other devices transmitting)
-5. Try connecting to a busy WiFi network
-6. Check ESP-IDF logs for errors (use `--monitor` flag)
-
-### Buffer full (dropped frames)
-
-**Symptoms**: `wlan.csi.dropped()` returns high numbers
-
-**Solutions**:
-1. Increase `buffer_size` in `config()` (e.g., 256 or 512)
-2. Read frames more frequently in your loop
-3. Reduce per-frame processing time
-4. Consider processing frames in batches
-
-### Compilation errors
-
-**Error**: `modwifi_csi.c: No such file or directory`
-
-**Solution**: Run `./scripts/integrate_csi.sh` before building
-
-**Error**: `MICROPY_PY_NETWORK_WLAN_CSI undeclared`
-
-**Solution**: Verify integration script completed successfully
-
-**Error**: ESP-IDF version mismatch
-
-**Solution**: 
-```bash
-rm -rf build
-./scripts/setup_env.sh
-./scripts/integrate_csi.sh
-./scripts/build_flash.sh
-```
-
-### Flash errors
-
-**Error**: `Failed to connect to ESP32`
-
-**Solution**: Put device in download mode (hold BOOT, press RESET, release BOOT)
-
-**Error**: Port not detected
-
-**Solution**: Check USB cable and try different port. List available ports:
-```bash
-ls -la /dev/cu.*
-```
 
 ## License
 
@@ -517,4 +524,4 @@ This module was developed for the MicroPython ESP32 port following project best 
 **Francesco Pace**  
 📧 Email: [francesco.pace@gmail.com](mailto:francesco.pace@gmail.com)  
 💼 LinkedIn: [linkedin.com/in/francescopace](https://www.linkedin.com/in/francescopace/)  
-🛜 Project: [ESPectre](https://github.com/francescopace/esp32-microcsi)
+🛜 Project: [ESP32-MicroCSI](https://github.com/francescopace/esp32-microcsi)

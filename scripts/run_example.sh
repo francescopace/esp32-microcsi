@@ -16,6 +16,34 @@ SSID="$1"
 PASSWORD="$2"
 SCRIPT="example_csi_analysis" # Change this to "example_csi_basic" to run the basic example
 
+# Detect ESP32 port automatically
+echo "Detecting ESP32 device..."
+PORT=""
+
+# Try common macOS USB serial ports
+for p in /dev/cu.usbmodem* /dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART*; do
+    if [ -e "$p" ]; then
+        # Check if port is not in use
+        if ! lsof "$p" >/dev/null 2>&1; then
+        PORT="$p"
+            echo "Found available ESP32 on: $PORT"
+        break
+        else
+            echo "Port $p is in use, trying next..."
+        fi
+    fi
+done
+
+if [ -z "$PORT" ]; then
+    echo "Error: No available ESP32 device found."
+    echo ""
+    echo "Available ports:"
+    ls -la /dev/cu.* 2>/dev/null || echo "No USB devices found"
+    echo ""
+    echo "If a port is in use, close any programs using it (e.g., screen, minicom, Arduino IDE)"
+    exit 1
+fi
+
 # Create temporary wifi_config.py
 cat > examples/wifi_config.py << EOF
 # Auto-generated WiFi configuration (temporary)
@@ -24,7 +52,8 @@ WIFI_PASSWORD = "$PASSWORD"
 EOF
 
 # Run the example
-mpremote connect /dev/cu.usbmodem5ABA0685451 fs cp examples/wifi_config.py :wifi_config.py + run examples/"$SCRIPT".py
+echo "Running example on $PORT..."
+mpremote connect "$PORT" fs cp examples/wifi_config.py :wifi_config.py + run examples/"$SCRIPT".py
 
 echo ""
 echo "Done!"

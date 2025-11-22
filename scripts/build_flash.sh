@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo "Options:"
             echo "  --board BOARD, -b BOARD  Board name (default: ESP32_GENERIC_S3)"
-            echo "                           Examples: ESP32_GENERIC_S3, ESP32_GENERIC, ESP32_GENERIC_S2, ESP32_GENERIC_C3"
+            echo "                           Examples: ESP32_GENERIC_S3, ESP32_GENERIC, ESP32_GENERIC_S2, ESP32_GENERIC_C3, ESP32_GENERIC_C6"
             echo "  --monitor, -m            Start monitor after flashing"
             echo "  --erase, -e              Erase flash before flashing"
             echo "  --help, -h               Show this help message"
@@ -179,6 +179,9 @@ case "$BOARD" in
     ESP32_GENERIC_C3)
         CHIP_TYPE="esp32c3"
         ;;
+    ESP32_GENERIC_C6)
+        CHIP_TYPE="esp32c6"
+        ;;
     *)
         # Try to extract chip type from board name
         if [[ "$BOARD" == *"S2"* ]]; then
@@ -187,6 +190,8 @@ case "$BOARD" in
             CHIP_TYPE="esp32s3"
         elif [[ "$BOARD" == *"C3"* ]]; then
             CHIP_TYPE="esp32c3"
+        elif [[ "$BOARD" == *"C6"* ]]; then
+            CHIP_TYPE="esp32c6"
         else
             CHIP_TYPE="esp32"
         fi
