@@ -68,8 +68,8 @@ if [ ! -d "esp-idf" ]; then
     echo -e "${YELLOW}Cloning ESP-IDF ${ESP_IDF_VERSION}...${NC}"
     git clone --recursive --branch ${ESP_IDF_VERSION} https://github.com/espressif/esp-idf.git
     cd esp-idf
-    echo -e "${YELLOW}Installing ESP-IDF tools...${NC}"
-    ./install.sh esp32s3
+    echo -e "${YELLOW}Installing ESP-IDF tools for multiple chips...${NC}"
+    ./install.sh
     cd ..
 else
     echo -e "${YELLOW}ESP-IDF already present, checking version...${NC}"
@@ -97,8 +97,8 @@ else
     
     # Check if tools are installed (check for toolchain directory)
     if [ ! -d "$HOME/.espressif/tools" ] || [ -z "$(ls -A $HOME/.espressif/tools 2>/dev/null)" ]; then
-        echo -e "${YELLOW}Installing ESP-IDF tools...${NC}"
-        ./install.sh esp32s3
+        echo -e "${YELLOW}Installing ESP-IDF tools for multiple chips...${NC}"
+        ./install.sh esp32,esp32s2,esp32s3,esp32c3,esp32c6
     else
         echo -e "${GREEN}✓ ESP-IDF tools already installed${NC}"
     fi

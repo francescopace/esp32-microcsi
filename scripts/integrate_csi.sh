@@ -43,6 +43,11 @@ if [ -d ".git" ]; then
     git clean -fd
     echo -e "${GREEN}✓ MicroPython repository reset${NC}"
     
+    # Initialize required submodules (needed after git clean)
+    echo -e "${YELLOW}Initializing required submodules...${NC}"
+    git submodule update --init lib/berkeley-db-1.xx lib/micropython-lib 2>/dev/null || true
+    echo -e "${GREEN}✓ Submodules initialized${NC}"
+    
     # Remove CSI files if they exist (they will be copied fresh)
     if [ -f "${ESP32_DIR}/modwifi_csi.c" ]; then
         rm -f "${ESP32_DIR}/modwifi_csi.c"
@@ -88,17 +93,50 @@ else
     echo -e "${GREEN}✓ mpconfigport.h updated${NC}"
 fi
 
-echo -e "${YELLOW}Step 3: Enabling CSI in sdkconfig.board...${NC}"
-# Check if CSI is already enabled in sdkconfig.board
-if grep -q "CONFIG_ESP_WIFI_CSI_ENABLED" "${ESP32_DIR}/boards/ESP32_GENERIC_S3/sdkconfig.board"; then
-    echo -e "${GREEN}✓ CSI already enabled in sdkconfig.board${NC}"
+echo -e "${YELLOW}Step 3: Enabling CSI in sdkconfig.board for all boards...${NC}"
+# Enable CSI for all supported boards
+BOARDS=("ESP32_GENERIC" "ESP32_GENERIC_S2" "ESP32_GENERIC_S3" "ESP32_GENERIC_C3" "ESP32_GENERIC_C6")
+for BOARD in "${BOARDS[@]}"; do
+    BOARD_DIR="${ESP32_DIR}/boards/${BOARD}"
+    if [ -d "${BOARD_DIR}" ]; then
+        SDKCONFIG="${BOARD_DIR}/sdkconfig.board"
+        if [ -f "${SDKCONFIG}" ]; then
+            if grep -q "CONFIG_ESP_WIFI_CSI_ENABLED" "${SDKCONFIG}"; then
+                echo -e "${GREEN}✓ CSI already enabled for ${BOARD}${NC}"
+            else
+                echo "CONFIG_ESP_WIFI_CSI_ENABLED=y" >> "${SDKCONFIG}"
+                echo -e "${GREEN}✓ CSI enabled for ${BOARD}${NC}"
+            fi
+        else
+            # Create sdkconfig.board if it doesn't exist
+            echo "CONFIG_ESP_WIFI_CSI_ENABLED=y" > "${SDKCONFIG}"
+            echo -e "${GREEN}✓ Created sdkconfig.board and enabled CSI for ${BOARD}${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠ Board ${BOARD} not found, skipping${NC}"
+    fi
+done
+
+echo -e "${YELLOW}Step 4: Updating sdkconfig.base...${NC}"
+SDKCONFIG_BASE="${ESP32_DIR}/boards/sdkconfig.base"
+
+# Enable CSI for all boards
+if ! grep -q "CONFIG_ESP_WIFI_CSI_ENABLED" "${SDKCONFIG_BASE}"; then
+    echo "CONFIG_ESP_WIFI_CSI_ENABLED=y" >> "${SDKCONFIG_BASE}"
+    echo -e "${GREEN}✓ Added CSI support to sdkconfig.base${NC}"
 else
-    # Add CSI configuration to sdkconfig.board
-    echo "CONFIG_ESP_WIFI_CSI_ENABLED=y" >> "${ESP32_DIR}/boards/ESP32_GENERIC_S3/sdkconfig.board"
-    echo -e "${GREEN}✓ CSI enabled in sdkconfig.board${NC}"
+    echo -e "${GREEN}✓ CSI already enabled in sdkconfig.base${NC}"
 fi
 
-echo -e "${YELLOW}Step 4: Updating esp32_common.cmake...${NC}"
+# Use SIZE optimization instead of PERF
+if grep -q "CONFIG_COMPILER_OPTIMIZATION_PERF=y" "${SDKCONFIG_BASE}"; then
+    sed -i '' 's/CONFIG_COMPILER_OPTIMIZATION_PERF=y/CONFIG_COMPILER_OPTIMIZATION_SIZE=y/' "${SDKCONFIG_BASE}"
+    echo -e "${GREEN}✓ Changed sdkconfig.base to use SIZE optimization${NC}"
+else
+    echo -e "${GREEN}✓ sdkconfig.base already using SIZE optimization${NC}"
+fi
+
+echo -e "${YELLOW}Step 5: Updating esp32_common.cmake...${NC}"
 # Check if modwifi_csi.c is already in esp32_common.cmake
 if grep -q "modwifi_csi.c" "${ESP32_DIR}/esp32_common.cmake"; then
     echo -e "${GREEN}✓ modwifi_csi.c already in esp32_common.cmake${NC}"
@@ -110,7 +148,7 @@ else
     echo -e "${GREEN}✓ esp32_common.cmake updated${NC}"
 fi
 
-echo -e "${YELLOW}Step 5: Patching network_wlan.c...${NC}"
+echo -e "${YELLOW}Step 6: Patching network_wlan.c...${NC}"
 # Check if CSI is already integrated
 if grep -q "modwifi_csi.h" "${ESP32_DIR}/network_wlan.c"; then
     echo -e "${GREEN}✓ network_wlan.c already patched${NC}"
@@ -144,7 +182,19 @@ echo "  - ${ESP32_DIR}/modwifi_csi.h (copied)"
 echo "  - ${ESP32_DIR}/mpconfigport.h (patched)"
 echo "  - ${ESP32_DIR}/esp32_common.cmake (patched)"
 echo "  - ${ESP32_DIR}/network_wlan.c (patched)"
+echo "  - ${ESP32_DIR}/boards/*/sdkconfig.board (CSI enabled for all supported boards)"
 echo ""
-echo -e "${YELLOW}Next step:${NC}"
-echo -e "   ${GREEN}./scripts/build_flash.sh${NC}"
+echo -e "${YELLOW}Next steps:${NC}"
+echo ""
+echo "1. Build and flash firmware:"
+echo -e "   ${GREEN}./scripts/build_flash.sh${NC}                    # Default: ESP32-S3"
+echo ""
+echo "   Or specify a different board:"
+echo -e "   ${GREEN}./scripts/build_flash.sh -b ESP32_GENERIC${NC}    # ESP32 classic"
+echo -e "   ${GREEN}./scripts/build_flash.sh -b ESP32_GENERIC_S2${NC} # ESP32-S2"
+echo -e "   ${GREEN}./scripts/build_flash.sh -b ESP32_GENERIC_C3${NC} # ESP32-C3"
+echo -e "   ${GREEN}./scripts/build_flash.sh -b ESP32_GENERIC_C6${NC} # ESP32-C6 (WiFi 6)"
+echo ""
+echo "2. Optional: Add --monitor flag to start serial monitor after flashing:"
+echo -e "   ${GREEN}./scripts/build_flash.sh --monitor${NC}"
 echo ""

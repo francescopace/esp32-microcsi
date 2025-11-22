@@ -91,7 +91,12 @@ def main():
     mac = wlan.config('mac')
     print("MAC address: " + ':'.join('%02x' % b for b in mac))
     
-    # Connect to WiFi (REQUIRED for CSI)
+    # Configure WiFi BEFORE connecting
+    print("Configuring WiFi for CSI...")
+    wlan.config(pm=wlan.PM_NONE)  # Disable power save
+    # Note: protocol and bandwidth are set automatically by MicroPython
+    
+    # Connect to WiFi
     print("Connecting to WiFi...")
     wlan.connect(WIFI_SSID, WIFI_PASSWORD)
     
@@ -110,19 +115,33 @@ def main():
     print("IP: " + wlan.ifconfig()[0])
     print()
     
-    # Configure CSI with default settings
-    wlan.csi.config(
-        lltf_en=True,
-        htltf_en=True,
-        stbc_htltf2_en=True,
-        ltf_merge_en=True,
-        channel_filter_en=True,
-        buffer_size=64
-    )
-    print("CSI configured")
+    # Wait for WiFi to be fully ready
+    print("Waiting for WiFi to stabilize...")
+    time.sleep(2)
+    
+    # Configure CSI - use minimal config for ESP32-C6 compatibility
+    # Note: LTF parameters are ignored on ESP32-C6 but may cause issues
+    print("Configuring CSI...")
+    try:
+        wlan.csi.config(buffer_size=64)
+        print("CSI configured (minimal config)")
+    except Exception as e:
+        print("Error configuring CSI: " + str(e))
+        return
     
     # Enable CSI
-    wlan.csi.enable()
+    print("Enabling CSI...")
+    try:
+        wlan.csi.enable()
+        print("CSI enabled successfully!")
+    except OSError as e:
+        print("ERROR: Failed to enable CSI")
+        print("Error code: " + str(e))
+        print("This may indicate:")
+        print("  - WiFi not fully initialized")
+        print("  - CSI not supported in current WiFi mode")
+        print("  - Hardware limitation")
+        return
     print("CSI enabled - capturing and analyzing frames...")
     print()
     

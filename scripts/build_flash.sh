@@ -16,6 +16,7 @@
 #   ./build_flash.sh                          # Build and flash ESP32-S3
 #   ./build_flash.sh -b ESP32_GENERIC         # Build and flash ESP32
 #   ./build_flash.sh -b ESP32_GENERIC_S2 -m  # Build, flash ESP32-S2 and start monitor
+#   ./build_flash.sh -b ESP32_GENERIC_C5      # Build and flash ESP32-C5
 
 set -e  # Exit on error
 
@@ -31,6 +32,7 @@ BOARD="ESP32_GENERIC_S3"
 # Parse arguments
 START_MONITOR=false
 ERASE_FLASH=false
+CLEAN_BUILD=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --board|-b)
@@ -49,11 +51,16 @@ while [[ $# -gt 0 ]]; do
             ERASE_FLASH=true
             shift
             ;;
+        --clean|-c)
+            CLEAN_BUILD=true
+            shift
+            ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo "Options:"
             echo "  --board BOARD, -b BOARD  Board name (default: ESP32_GENERIC_S3)"
-            echo "                           Examples: ESP32_GENERIC_S3, ESP32_GENERIC, ESP32_GENERIC_S2, ESP32_GENERIC_C3"
+            echo "                           Examples: ESP32_GENERIC_S3, ESP32_GENERIC, ESP32_GENERIC_S2, ESP32_GENERIC_C3, ESP32_GENERIC_C5, ESP32_GENERIC_C6"
+            echo "  --clean, -c              Clean build before compiling (removes build directory)"
             echo "  --monitor, -m            Start monitor after flashing"
             echo "  --erase, -e              Erase flash before flashing"
             echo "  --help, -h               Show this help message"
@@ -101,9 +108,14 @@ echo -e "${GREEN}✓ ESP-IDF environment loaded${NC}"
 # Navigate to ESP32 port
 cd "${ESP32_DIR}"
 
-# Clean previous build (optional, comment out for faster rebuilds)
-#echo -e "${YELLOW}Cleaning previous build...${NC}"
-#make BOARD=${BOARD} clean || true
+# Clean previous build if requested
+if [ "$CLEAN_BUILD" = true ]; then
+    echo -e "${YELLOW}Cleaning previous build...${NC}"
+    make BOARD=${BOARD} clean || true
+    echo -e "${YELLOW}Removing build directory for complete clean...${NC}"
+    rm -rf "build-${BOARD}"
+    echo -e "${GREEN}✓ Build cleaned${NC}"
+fi
 
 # Configure for selected board
 echo -e "${YELLOW}Configuring for ${BOARD}...${NC}"
@@ -179,6 +191,12 @@ case "$BOARD" in
     ESP32_GENERIC_C3)
         CHIP_TYPE="esp32c3"
         ;;
+    ESP32_GENERIC_C5)
+        CHIP_TYPE="esp32c5"
+        ;;
+    ESP32_GENERIC_C6)
+        CHIP_TYPE="esp32c6"
+        ;;
     *)
         # Try to extract chip type from board name
         if [[ "$BOARD" == *"S2"* ]]; then
@@ -187,6 +205,10 @@ case "$BOARD" in
             CHIP_TYPE="esp32s3"
         elif [[ "$BOARD" == *"C3"* ]]; then
             CHIP_TYPE="esp32c3"
+        elif [[ "$BOARD" == *"C5"* ]]; then
+            CHIP_TYPE="esp32c5"
+        elif [[ "$BOARD" == *"C6"* ]]; then
+            CHIP_TYPE="esp32c6"
         else
             CHIP_TYPE="esp32"
         fi
