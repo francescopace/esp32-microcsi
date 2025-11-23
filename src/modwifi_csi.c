@@ -208,10 +208,10 @@ void IRAM_ATTR wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     // Get timestamp
     frame.timestamp_us = (uint32_t)esp_timer_get_time();
 
-    // Copy CSI data
+    // Copy CSI data (info->buf is int8_t*, info->len is in bytes)
     frame.len = info->len > CSI_MAX_DATA_LEN ? CSI_MAX_DATA_LEN : info->len;
     if (info->buf && frame.len > 0) {
-        memcpy(frame.data, info->buf, frame.len * sizeof(int16_t));
+        memcpy(frame.data, info->buf, frame.len);
     }
 
     // Write to circular buffer
@@ -259,8 +259,10 @@ esp_err_t wifi_csi_enable(void) {
     // Configure WiFi protocol mode
     #if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
     // ESP32-C5/C6: Enable WiFi 6 (802.11ax) for improved performance and CSI capture
+    ESP_LOGI(TAG, "Setting WiFi protocol to 802.11b/g/n/ax...");
     ret = esp_wifi_set_protocol(WIFI_IF_STA,
         WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX);
+    ESP_LOGD(TAG, "esp_wifi_set_protocol returned: 0x%x", ret);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to set WiFi protocol: 0x%x", ret);
     } else {
@@ -278,7 +280,9 @@ esp_err_t wifi_csi_enable(void) {
     #endif
 
     // Configure WiFi bandwidth (HT20 for stability)
+    ESP_LOGI(TAG, "Setting WiFi bandwidth to HT20...");
     ret = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+    ESP_LOGD(TAG, "esp_wifi_set_bandwidth returned: 0x%x", ret);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to set bandwidth: 0x%x", ret);
     } else {
@@ -291,7 +295,7 @@ esp_err_t wifi_csi_enable(void) {
     ret = esp_wifi_set_promiscuous(false);
     ESP_LOGD(TAG, "esp_wifi_set_promiscuous returned: 0x%x", ret);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set promiscuous mode");
+        ESP_LOGE(TAG, "Failed to set promiscuous mode: 0x%x", ret);
         return ret;
     }
     ESP_LOGI(TAG, "Promiscuous mode: disabled (CSI from connected AP only)");
@@ -415,7 +419,7 @@ esp_err_t wifi_csi_enable(void) {
     ret = esp_wifi_set_csi_config(&csi_config);
     ESP_LOGD(TAG, "esp_wifi_set_csi_config returned: 0x%x", ret);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set CSI config");
+        ESP_LOGE(TAG, "Failed to set CSI config: 0x%x", ret);
         return ret;
     }
 
@@ -423,16 +427,20 @@ esp_err_t wifi_csi_enable(void) {
     ret = esp_wifi_set_csi_rx_cb(wifi_csi_rx_cb, NULL);
     ESP_LOGD(TAG, "esp_wifi_set_csi_rx_cb returned: 0x%x", ret);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register callback");
+        ESP_LOGE(TAG, "Failed to register callback: 0x%x", ret);
         return ret;
     }
 
     // Enable CSI LAST
     ESP_LOGI(TAG, "Calling esp_wifi_set_csi(true)...");
     ret = esp_wifi_set_csi(true);
-    ESP_LOGD(TAG, "esp_wifi_set_csi returned: 0x%x", ret);
+    ESP_LOGD(TAG, "esp_wifi_set_csi returned: 0x%x (ESP_OK=0x%x)", ret, ESP_OK);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to enable CSI (error code: 0x%x)", ret);
+        ESP_LOGE(TAG, "Common causes:");
+        ESP_LOGE(TAG, "  - WiFi not connected");
+        ESP_LOGE(TAG, "  - CSI config invalid");
+        ESP_LOGE(TAG, "  - Hardware limitation");
         return ret;
     }
 
@@ -615,10 +623,10 @@ STATIC mp_obj_t wifi_csi_read_obj(mp_obj_t self_in) {
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_mac),
         mp_obj_new_bytes(frame.mac, 6));
 
-    // CSI data as array('h')
+    // CSI data as array('b') - int8_t values matching ESP-IDF API
     mp_obj_array_t *csi_array = MP_OBJ_TO_PTR(mp_obj_new_bytearray_by_ref(
-        frame.len * sizeof(int16_t), frame.data));
-    csi_array->typecode = 'h';
+        frame.len, frame.data));
+    csi_array->typecode = 'b';
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_data), MP_OBJ_FROM_PTR(csi_array));
 
     return dict;

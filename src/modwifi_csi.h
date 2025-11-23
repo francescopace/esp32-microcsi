@@ -25,76 +25,76 @@
  * THE SOFTWARE.
  */
 
-#ifndef MICROPY_INCLUDED_ESP32_MODWIFI_CSI_H
-#define MICROPY_INCLUDED_ESP32_MODWIFI_CSI_H
+ #ifndef MICROPY_INCLUDED_ESP32_MODWIFI_CSI_H
+ #define MICROPY_INCLUDED_ESP32_MODWIFI_CSI_H
 
-#include "py/obj.h"
+ #include "py/obj.h"
 
-#if MICROPY_PY_NETWORK_WLAN_CSI
+ #if MICROPY_PY_NETWORK_WLAN_CSI
 
-#include "esp_wifi.h"
-#include "esp_wifi_types.h"
+ #include "esp_wifi.h"
+ #include "esp_wifi_types.h"
 
-// Maximum CSI data size: HT40 with 128 subcarriers, 3 values per subcarrier (I, Q, pilot)
-#define CSI_MAX_DATA_LEN 384
+// Maximum CSI data size: HT20 with 64 subcarriers × 2 (I, Q)
+ #define CSI_MAX_DATA_LEN 128
 
 // Default buffer size (number of frames)
-#define CSI_DEFAULT_BUFFER_SIZE 128
+ #define CSI_DEFAULT_BUFFER_SIZE 128
 
 // CSI frame structure - stored in circular buffer
 typedef struct {
-    int8_t rssi;                    // RSSI value
-    uint8_t rate;                   // Data rate
-    uint8_t mac[6];                 // Source MAC address
-    uint32_t timestamp_us;          // Timestamp in microseconds
-    int16_t data[CSI_MAX_DATA_LEN]; // CSI data (complex values)
-    uint16_t len;                   // Actual length of CSI data
-    uint8_t sig_mode;               // Signal mode (legacy, HT, VHT)
-    uint8_t mcs;                    // MCS index
-    uint8_t cwb;                    // Channel bandwidth
-    uint8_t smoothing;              // Smoothing applied
-    uint8_t not_sounding;           // Not sounding frame
-    uint8_t aggregation;            // Aggregation
-    uint8_t stbc;                   // STBC
-    uint8_t fec_coding;             // FEC coding
-    uint8_t sgi;                    // Short GI
-    int8_t noise_floor;             // Noise floor
-    uint16_t ampdu_cnt;             // AMPDU count
-    uint8_t channel;                // Primary channel
-    uint8_t secondary_channel;      // Secondary channel
-    uint32_t local_timestamp;       // Local timestamp
-    uint16_t ant;                   // Antenna
-    uint16_t sig_len;               // Signal length
-    uint32_t rx_state;              // RX state
+    int8_t rssi;                     // RSSI value
+    uint8_t rate;                    // Data rate
+    uint8_t mac[6];                  // Source MAC address
+    uint32_t timestamp_us;           // Timestamp in microseconds
+    int8_t data[CSI_MAX_DATA_LEN];   // CSI data (I/Q values as int8_t, matches ESP-IDF)
+    uint16_t len;                    // Actual length of CSI data
+    uint8_t sig_mode;                // Signal mode (legacy, HT, VHT)
+    uint8_t mcs;                     // MCS index
+    uint8_t cwb;                     // Channel bandwidth
+    uint8_t smoothing;               // Smoothing applied
+    uint8_t not_sounding;            // Not sounding frame
+    uint8_t aggregation;             // Aggregation
+    uint8_t stbc;                    // STBC
+    uint8_t fec_coding;              // FEC coding
+    uint8_t sgi;                     // Short GI
+    int8_t noise_floor;              // Noise floor
+    uint16_t ampdu_cnt;              // AMPDU count
+    uint8_t channel;                 // Primary channel
+    uint8_t secondary_channel;       // Secondary channel
+    uint32_t local_timestamp;        // Local timestamp
+    uint16_t ant;                    // Antenna
+    uint16_t sig_len;                // Signal length
+    uint32_t rx_state;               // RX state
 } csi_frame_t;
 
 // Circular buffer for CSI frames
 typedef struct {
-    csi_frame_t *frames;            // Pre-allocated frame array
-    volatile uint32_t head;         // Write position (updated by ISR)
-    volatile uint32_t tail;         // Read position (updated by Python)
-    uint32_t size;                  // Buffer size (number of frames)
-    volatile uint32_t dropped;      // Counter for dropped frames
-    bool initialized;               // Buffer initialization flag
+    csi_frame_t *frames;             // Pre-allocated frame array
+    volatile uint32_t head;          // Write position (updated by ISR)
+    volatile uint32_t tail;          // Read position (updated by Python)
+    uint32_t size;                   // Buffer size (number of frames)
+    volatile uint32_t dropped;       // Counter for dropped frames
+    bool initialized;                // Buffer initialization flag
 } csi_buffer_t;
 
 // CSI configuration structure
 typedef struct {
-    bool lltf_en;                   // Enable Legacy Long Training Field
-    bool htltf_en;                  // Enable HT Long Training Field
-    bool stbc_htltf2_en;            // Enable STBC HT-LTF2
-    bool ltf_merge_en;              // Enable LTF merge
-    bool channel_filter_en;         // Enable channel filter
-    bool manu_scale;                // Manual scale
-    uint8_t shift;                  // Shift value (0-15)
-    uint32_t buffer_size;           // Buffer size (number of frames)
+    bool lltf_en;                    // Enable Legacy Long Training Field
+    bool htltf_en;                   // Enable HT Long Training Field
+    bool stbc_htltf2_en;             // Enable STBC HT-LTF2
+    bool ltf_merge_en;               // Enable LTF merge
+    bool channel_filter_en;          // Enable channel filter
+    bool manu_scale;                 // Manual scale
+    uint8_t shift;                   // Shift value (0-15)
+    uint32_t buffer_size;            // Buffer size (number of frames)
 } csi_config_t;
 
 // CSI module state
 typedef struct {
-    csi_buffer_t buffer;            // Circular buffer
-    csi_config_t config;            // Current configuration
-    bool enabled;                   // CSI enabled flag
+    csi_buffer_t buffer;             // Circular buffer
+    csi_config_t config;             // Current configuration
+    bool enabled;                    // CSI enabled flag
 } csi_state_t;
 
 // Global CSI state
@@ -120,6 +120,6 @@ typedef struct _wifi_csi_obj_t {
     mp_obj_base_t base;
 } wifi_csi_obj_t;
 
-#endif // MICROPY_PY_NETWORK_WLAN_CSI
+ #endif // MICROPY_PY_NETWORK_WLAN_CSI
 
-#endif // MICROPY_INCLUDED_ESP32_MODWIFI_CSI_H
+ #endif // MICROPY_INCLUDED_ESP32_MODWIFI_CSI_H

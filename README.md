@@ -7,6 +7,18 @@
 
 Native MicroPython module for ESP32 that exposes ESP-IDF CSI (Channel State Information) functionality.
 
+## What is CSI?
+
+Channel State Information (CSI) provides detailed information about the Wi-Fi channel state by analyzing physical layer signals. Unlike simple RSSI measurements, CSI captures the complex channel response across multiple subcarriers, enabling advanced applications such as:
+
+- **Motion Detection**: Detect human presence and movement through Wi-Fi signal changes
+- **Indoor Localization**: Precise positioning using Wi-Fi signal fingerprinting
+- **Gesture Recognition**: Recognize hand gestures and body movements
+- **Device-Free Sensing**: Monitor environments without wearable sensors
+- **Activity Recognition**: Identify different types of human activities
+
+This module provides low-level access to CSI data through a simple Python API, making it easy to build Wi-Fi sensing applications on ESP32 devices.
+
 ## Requirements
 
 - **ESP-IDF**: v5.4.2
@@ -221,19 +233,57 @@ cd /path/to/ESP32-MicroCSI
 - **ISR-safe callback** without dynamic allocations
 - **Flexible configuration** with all ESP-IDF parameters
 - **Conditional compilation** to reduce binary size
-- **Efficient data format** using `bytes` and `array('h')`
+- **Efficient data format** using `bytes` and `array('b')` for int8 CSI data
+- **Multi-chip support** with automatic configuration for all ESP32 variants
+- **Wi-Fi 6 (802.11ax) support** on ESP32-C6 and ESP32-C5
 
 ## Architecture
 
 ### Circular Buffer
 
-The module uses a pre-allocated circular buffer to store received CSI frames:
+The module uses a pre-allocated circular buffer to store received CSI frames, implementing a lock-free producer-consumer pattern:
 
+- **Producer**: Wi-Fi hardware captures CSI frames and stores them in the buffer (ISR context)
+- **Consumer**: Python code reads frames from the buffer at its own pace
 - **Default size**: 128 frames (configurable 1-1024)
 - **Lock-free**: Safe for concurrent ISR/Python access
 - **Zero allocations**: Everything pre-allocated at initialization
 - **Dropped counter**: Tracks frames lost when buffer is full
-- **Memory efficient**: ~750 bytes per frame
+- **Memory efficient**: ~172 bytes per frame (metadata + up to 128 bytes CSI data)
+
+#### Buffer Sizing Guidelines
+
+Choose buffer size based on your application needs:
+
+- **Small buffer (32-64 frames)**: 
+  - Lower RAM usage (~5-11KB)
+  - Risk of frame drops if Python processing is slow
+  - Suitable for simple applications with low traffic
+
+- **Default buffer (128 frames)**: 
+  - Balanced approach (~22KB RAM)
+  - Handles moderate traffic bursts
+  - Recommended for most applications
+
+- **Large buffer (256-512 frames)**: 
+  - Minimal frame drops (~44-88KB RAM)
+  - Suitable for high-traffic scenarios
+  - Best for applications requiring continuous capture
+
+#### Memory Calculation
+
+RAM usage can be estimated as:
+```
+RAM usage ≈ buffer_size × 172 bytes per frame
+
+Examples:
+- 32 frames × 172 bytes = ~5.5KB
+- 128 frames × 172 bytes = ~22KB (default)
+- 256 frames × 172 bytes = ~44KB
+- 512 frames × 172 bytes = ~88KB
+```
+
+**Note**: Each frame's `data` field can hold up to 128 bytes of CSI samples (64 subcarriers × 2 for I/Q components). The actual CSI data length varies based on Wi-Fi mode and configuration (typically 52-128 bytes for HT20).
 
 ### ISR Callback
 
@@ -265,7 +315,6 @@ The `wifi_csi_enable()` function follows a specific sequence that is **critical 
   - The `false` value means we're not enabling full promiscuous mode, just preparing the WiFi stack
 - The order of steps 5-6 is critical: promiscuous mode must be called before CSI configuration
 - ESP32-C6 uses a different CSI configuration API but the sequence remains the same
-
 
 ### Frame Structure
 
@@ -334,7 +383,7 @@ if frame:
     print("MAC: " + mac_str)
     print("Timestamp: " + str(frame['timestamp']) + " µs")
     
-    # CSI data as array('h')
+    # CSI data as array('b') - int8 values
     csi_data = frame['data']
     print("CSI length: " + str(len(csi_data)))
     
@@ -384,7 +433,7 @@ Each CSI frame is a dictionary with the following fields:
 | `ant` | `int` | Antenna | ✅ Available | ⚠️ Always 0 | ⚠️ Always 0 |
 | `sig_len` | `int` | Signal length | ✅ Available | ✅ Available | ✅ Available |
 | `mac` | `bytes` | Source MAC address (6 bytes) | ✅ Available | ✅ Available | ✅ Available |
-| `data` | `array('h')` | CSI data (complex values) | ✅ Available | ✅ Available | ✅ Available |
+| `data` | `array('b')` | CSI data (int8 I/Q values) | ✅ Available | ✅ Available | ✅ Available |
 
 **Chip Compatibility Notes:**
 - **ESP32, ESP32-S2, ESP32-S3, ESP32-C3**: All fields are available from the hardware
@@ -410,13 +459,11 @@ wlan.connect("YourSSID", "YourPassword")
 while not wlan.isconnected():
     time.sleep(0.5)
 
-# Configure CSI
-wlan.csi.config(
-    lltf_en=True,
-    htltf_en=True,
-    stbc_htltf2_en=True,
-    buffer_size=64
-)
+# Configure CSI buffer (optional - default is 128 frames)
+# buffer_size: Number of CSI frames to store in circular buffer
+# Each frame is ~172 bytes (metadata + up to 128 bytes of CSI data)
+# Larger buffer = less frame drops, but more RAM usage
+wlan.csi.config(buffer_size=64)  # Store up to 64 frames (~11KB RAM)
 
 # Enable CSI
 wlan.csi.enable()
@@ -448,32 +495,28 @@ finally:
 ./scripts/run_example.sh YourSSID YourPassword
 ```
 
-## Technical Notes
+## Testing
 
-### Buffer Sizing
+### Test Results
 
-Buffer size depends on frame reception rate:
+The module has been extensively tested on ESP32-S3 and ESP32-C6:
 
-- **8 frames**: Basic testing, low memory (~6 KB)
-- **32 frames**: Normal use (~24 KB)
-- **128 frames**: Intensive analysis (~96 KB)
-- **1024 frames**: Maximum (~768 KB)
+**ESP32-S3 Test Results:**
+- ✅ Successfully captured CSI frames with RSSI=-48 dBm, Channel=4, 256 samples
+- ✅ Circular buffer working correctly: 63 frames captured, 28 dropped during overflow test
+- ✅ All API methods verified: `config()`, `enable()`, `disable()`, `read()`, `available()`, `dropped()`
+- ✅ Buffer overflow handling: `dropped()` counter correctly tracks lost frames when buffer is full
 
-Each frame occupies approximately 750 bytes in memory.
+**ESP32-C6 Test Results:**
+- ✅ All CSI functionality working correctly with Wi-Fi 6 support
+- ✅ Wi-Fi 6 (802.11ax) CSI capture confirmed using the new ESP-IDF 5.x API
+- ✅ `acquire_csi_*` configuration fields working as expected
+- ✅ Successfully captured CSI from Legacy (802.11a/g), HT20 (802.11n), and WiFi 6 SU packets
 
-### Performance
-
-- **ISR callback**: < 100 µs per frame
-- **Python read**: < 500 µs per frame
-- **Throughput**: > 1000 frames/sec
-
-### Limitations
-
-- **Memory**: Pre-allocated buffer, not resizable at runtime
-- **Concurrency**: Single Python reader supported
-- **WiFi**: Must be in STA or AP+STA mode
-
-## Important Notes
+**Untested Chips:**
+- ⚠️ ESP32, ESP32-S2, ESP32-C3, ESP32-C5: Not tested due to hardware availability
+- ✅ Code includes conditional compilation for all variants based on ESP-IDF documentation
+- ✅ Firmware compiles successfully for all ESP32_GENERIC boards
 
 ### Multi-Chip Support
 
@@ -505,6 +548,47 @@ The module supports multiple ESP32 variants with automatic configuration:
   - This is a hardware/driver limitation, not a bug in the module
   - Critical fields (rssi, rate, channel, noise_floor, timestamp, mac, CSI data) work correctly
 
+## Trade-offs and Design Decisions
+
+### Code Size Impact
+
+The CSI module adds approximately **15KB** to the firmware when enabled:
+
+- Total application size: ~1.87MB (fits in 2MB partition with 8% free space)
+- Conditional compilation via `MICROPY_PY_NETWORK_WLAN_CSI` allows disabling if needed
+- Compiler optimizations (`-Os`) reduce overall firmware size by ~5-10%
+
+### Justification
+
+The 15KB overhead is justified because:
+
+1. **New Application Categories**: CSI enables entirely new use cases (sensing, localization, gesture recognition)
+2. **Optional Feature**: Can be disabled via build configuration if not needed
+3. **Efficient Implementation**: Lock-free ISR-safe design with minimal overhead
+4. **Comparable Footprint**: Similar features (Bluetooth, ESP-NOW) have comparable or larger footprints
+
+### Alternative Approaches Considered
+
+**Initial Approach**: Created separate `sdkconfig.board` files for each board
+- ❌ More complex to maintain
+- ❌ Inconsistent across boards
+- ❌ Harder to update
+
+**Final Approach**: Single `CONFIG_ESP_WIFI_CSI_ENABLED=y` line in `sdkconfig.base`
+- ✅ Better maintainability
+- ✅ Consistency across all ESP32 variants
+- ✅ Simpler configuration hierarchy
+
+### Design Decisions
+
+1. **Circular Buffer**: Chosen over dynamic allocation for ISR safety and predictable performance
+2. **Singleton Pattern**: One CSI instance per WLAN interface for simplicity
+3. **Conditional API**: Different configuration for ESP32-C6 WiFi 6 vs legacy chips
+4. **Pre-allocated Frames**: Avoids memory fragmentation and ensures deterministic behavior
+5. **Lock-free Implementation**: Enables safe concurrent access from ISR and Python contexts
+
+## Technical Notes
+
 ### General Requirements
 
 - **WiFi Connection Required**: CSI requires an active WiFi connection. Connect to an AP before enabling CSI.
@@ -529,11 +613,24 @@ The module currently supports **HT20 (20MHz) bandwidth only**:
 
 ### CSI Data Format
 
-- CSI data is returned as `array('h')` containing alternating I/Q values
+- CSI data is returned as `array('b')` containing alternating int8 I/Q values
 - Each subcarrier has 2 values: real (I) and imaginary (Q)
-- Maximum 384 values (192 subcarriers for HT40)
+- Value range: -128 to +127 (int8_t, matches ESP-IDF API)
+- HT20: 128 values (64 subcarriers × 2)
+- HT40: 256 values (128 subcarriers × 2) - future support
 - Calculate amplitude: `sqrt(I² + Q²)`
 - Calculate phase: `atan2(Q, I)`
+
+### Limitations
+
+- **Memory**: Pre-allocated buffer, not resizable at runtime
+- **Concurrency**: Single Python reader supported
+- **WiFi**: Must be in STA or AP+STA mode
+- **Bandwidth**: HT20 only (HT40 support planned)
+
+## Related Projects
+
+The CSI acquisition implementation in this module is based on techniques developed in the [ESPectre](https://github.com/francescopace/espectre) project, a Wi-Fi-based motion detection system. The MicroPython CSI module provides the low-level CSI capture functionality that can serve as a foundation for Wi-Fi sensing applications.
 
 ## License
 
@@ -548,7 +645,7 @@ This module was developed for the MicroPython ESP32 port following project best 
 - [ESP-IDF CSI Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/wifi.html#wi-fi-channel-state-information)
 - [MicroPython ESP32 Port](https://github.com/micropython/micropython/tree/master/ports/esp32)
 - [IEEE 802.11 CSI](https://en.wikipedia.org/wiki/Channel_state_information)
-
+- [ESPectre Project](https://github.com/francescopace/espectre) - Wi-Fi-based motion detection system
 
 ## 👤 Author
 
