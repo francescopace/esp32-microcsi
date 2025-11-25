@@ -200,7 +200,7 @@ Then in Python REPL:
 import network
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
-print(hasattr(wlan, 'csi'))  # Should print True
+print(hasattr(wlan, 'csi_enable'))  # Should print True
 ```
 
 ### Troubleshooting Setup
@@ -336,8 +336,8 @@ import network
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 
-# Configure CSI with all parameters
-wlan.csi.config(
+# Enable CSI with configuration (all parameters optional)
+wlan.csi_enable(
     lltf_en=True,           # Enable Legacy Long Training Field
     htltf_en=True,          # Enable HT Long Training Field
     stbc_htltf2_en=True,    # Enable STBC HT-LTF2
@@ -359,18 +359,24 @@ wlan.csi.config(
 ### Enable/Disable
 
 ```python
-# Enable CSI
-wlan.csi.enable()
+# Enable CSI (with default config)
+wlan.csi_enable()
 
-# Disable CSI
-wlan.csi.disable()
+# Or enable with custom config
+wlan.csi_enable(buffer_size=64)
+
+# Disable CSI (cleans state and deallocates buffer)
+wlan.csi_disable()
+
+# Re-enable requires passing config again
+wlan.csi_enable(buffer_size=128)
 ```
 
 ### Reading Frames
 
 ```python
 # Non-blocking read (returns None if buffer empty)
-frame = wlan.csi.read()
+frame = wlan.csi_read()
 
 if frame:
     # Format MAC address manually (MicroPython compatible)
@@ -399,11 +405,11 @@ if frame:
 
 ```python
 # Number of frames available in buffer
-available = wlan.csi.available()
+available = wlan.csi_available()
 print("Frames available: " + str(available))
 
 # Number of dropped frames (buffer full)
-dropped = wlan.csi.dropped()
+dropped = wlan.csi_dropped()
 print("Frames dropped: " + str(dropped))
 ```
 
@@ -459,19 +465,16 @@ wlan.connect("YourSSID", "YourPassword")
 while not wlan.isconnected():
     time.sleep(0.5)
 
-# Configure CSI buffer (optional - default is 128 frames)
+# Enable CSI with buffer configuration
 # buffer_size: Number of CSI frames to store in circular buffer
 # Each frame is ~172 bytes (metadata + up to 128 bytes of CSI data)
 # Larger buffer = less frame drops, but more RAM usage
-wlan.csi.config(buffer_size=64)  # Store up to 64 frames (~11KB RAM)
-
-# Enable CSI
-wlan.csi.enable()
+wlan.csi_enable(buffer_size=64)  # Store up to 64 frames (~11KB RAM)
 
 # Reading loop
 try:
     while True:
-        frame = wlan.csi.read()
+        frame = wlan.csi_read()
         if frame:
             mac_str = ':'.join('%02x' % b for b in frame['mac'])
             print("RSSI: %3d dBm | Rate: %2d | MCS: %2d | MAC: %s" % 
@@ -484,8 +487,8 @@ except KeyboardInterrupt:
     
 finally:
     # Disable CSI
-    wlan.csi.disable()
-    print("Dropped frames: " + str(wlan.csi.dropped()))
+    wlan.csi_disable()
+    print("Dropped frames: " + str(wlan.csi_dropped()))
 ```
 
 **Quick start with provided scripts:**

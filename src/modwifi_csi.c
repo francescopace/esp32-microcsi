@@ -25,18 +25,18 @@
  * THE SOFTWARE.
  */
 
-#include "py/runtime.h"
 #include "py/mphal.h"
 #include "py/objarray.h"
+#include "py/runtime.h"
 
 #if MICROPY_PY_NETWORK_WLAN_CSI
 
-#include "modwifi_csi.h"
-#include "esp_wifi.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "modwifi_csi.h"
 #include <string.h>
 
 // Define STATIC if not already defined
@@ -48,7 +48,8 @@ static const char *TAG = "wifi_csi";
 
 // Global CSI state
 csi_state_t g_csi_state = {
-    .buffer = {
+    .buffer =
+    {
         .frames = NULL,
         .head = 0,
         .tail = 0,
@@ -56,7 +57,8 @@ csi_state_t g_csi_state = {
         .dropped = 0,
         .initialized = false,
     },
-    .config = {
+    .config =
+    {
         .lltf_en = true,
         .htltf_en = true,
         .stbc_htltf2_en = true,
@@ -102,6 +104,7 @@ static void csi_buffer_deinit(csi_buffer_t *buf) {
         free(buf->frames);
         buf->frames = NULL;
         buf->initialized = false;
+        buf->dropped = 0; // Reset dropped counter for clean state
     }
 }
 
@@ -160,7 +163,8 @@ void IRAM_ATTR wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     memset(&frame, 0, sizeof(csi_frame_t));
 
     // Extract metadata
-    // Note: ESP32-C5 and ESP32-C6 have a different rx_ctrl structure with fewer fields
+    // Note: ESP32-C5 and ESP32-C6 have a different rx_ctrl structure with fewer
+    // fields
     frame.rssi = info->rx_ctrl.rssi;
     frame.rate = info->rx_ctrl.rate;
 
@@ -248,7 +252,8 @@ esp_err_t wifi_csi_enable(void) {
 
     // Ensure buffer is initialized
     if (!g_csi_state.buffer.initialized) {
-        ESP_LOGI(TAG, "Initializing buffer (size=%lu)...", (unsigned long)g_csi_state.config.buffer_size);
+        ESP_LOGI(TAG, "Initializing buffer (size=%lu)...",
+            (unsigned long)g_csi_state.config.buffer_size);
         if (!csi_buffer_init(&g_csi_state.buffer, g_csi_state.config.buffer_size)) {
             ESP_LOGE(TAG, "Failed to initialize buffer");
             return ESP_ERR_NO_MEM;
@@ -256,12 +261,14 @@ esp_err_t wifi_csi_enable(void) {
         ESP_LOGI(TAG, "Buffer initialized OK");
     }
 
-    // Configure WiFi protocol mode
+// Configure WiFi protocol mode
     #if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
-    // ESP32-C5/C6: Enable WiFi 6 (802.11ax) for improved performance and CSI capture
+    // ESP32-C5/C6: Enable WiFi 6 (802.11ax) for improved performance and CSI
+    // capture
     ESP_LOGI(TAG, "Setting WiFi protocol to 802.11b/g/n/ax...");
     ret = esp_wifi_set_protocol(WIFI_IF_STA,
-        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX);
+        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G |
+        WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX);
     ESP_LOGD(TAG, "esp_wifi_set_protocol returned: 0x%x", ret);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to set WiFi protocol: 0x%x", ret);
@@ -270,8 +277,8 @@ esp_err_t wifi_csi_enable(void) {
     }
     #else
     // ESP32, ESP32-S2, ESP32-S3, ESP32-C3: WiFi 4 only (802.11b/g/n)
-    ret = esp_wifi_set_protocol(WIFI_IF_STA,
-        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    ret = esp_wifi_set_protocol(
+        WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to set WiFi protocol: 0x%x", ret);
     } else {
@@ -289,8 +296,9 @@ esp_err_t wifi_csi_enable(void) {
         ESP_LOGI(TAG, "WiFi bandwidth set to HT20 (20MHz)");
     }
 
-    // IMPORTANT: For ESP32-C6, promiscuous mode MUST be called BEFORE configuring CSI
-    // This initializes internal WiFi structures required for CSI, even when set to false
+    // IMPORTANT: For ESP32-C6, promiscuous mode MUST be called BEFORE configuring
+    // CSI This initializes internal WiFi structures required for CSI, even when
+    // set to false
     ESP_LOGI(TAG, "Initializing promiscuous mode (false)...");
     ret = esp_wifi_set_promiscuous(false);
     ESP_LOGD(TAG, "esp_wifi_set_promiscuous returned: 0x%x", ret);
@@ -303,115 +311,140 @@ esp_err_t wifi_csi_enable(void) {
     #if CONFIG_IDF_TARGET_ESP32C6
     // ESP32-C6: Full WiFi 6 config with HE STBC support
     // Reference: https://github.com/espressif/esp-idf/issues/14271
-    // CRITICAL: Must specify which CSI types to acquire, otherwise callback is never invoked!
+    // CRITICAL: Must specify which CSI types to acquire, otherwise callback is
+    // never invoked!
     wifi_csi_config_t csi_config = {
-        .enable = 1,                    // Master enable for CSI acquisition (REQUIRED)
+        .enable = 1, // Master enable for CSI acquisition (REQUIRED)
 
-        .acquire_csi_legacy = 1,        // Acquire L-LTF CSI from legacy 802.11a/g packets
-                                        // CRITICAL: Required for CSI callback to be invoked!
-                                        // Captures channel state from non-HT packets
+        .acquire_csi_legacy =
+            1, // Acquire L-LTF CSI from legacy 802.11a/g packets
+               // CRITICAL: Required for CSI callback to be invoked!
+               // Captures channel state from non-HT packets
 
-        .acquire_csi_ht20 = 1,          // Acquire HT-LTF CSI from 802.11n HT20 packets
-                                        // CRITICAL: Required for CSI from HT packets!
-                                        // Provides improved channel estimation for MIMO
+        .acquire_csi_ht20 = 1, // Acquire HT-LTF CSI from 802.11n HT20 packets
+                               // CRITICAL: Required for CSI from HT packets!
+                               // Provides improved channel estimation for MIMO
 
-        .acquire_csi_ht40 = 0,          // Acquire HT-LTF CSI from 802.11n HT40 packets (40MHz bandwidth)
-                                        // Disabled (using HT20 for stability)
-                                        // Enable if router uses HT40 and you need 128 subcarriers
+        .acquire_csi_ht40 =
+            0, // Acquire HT-LTF CSI from 802.11n HT40 packets (40MHz bandwidth)
+               // Disabled (using HT20 for stability)
+               // Enable if router uses HT40 and you need 128 subcarriers
 
-        .acquire_csi_su = 1,            // Acquire HE-LTF CSI from 802.11ax HE20 SU (Single-User) packets
-                                        // Enabled for WiFi 6 support (if router supports 802.11ax)
+        .acquire_csi_su =
+            1, // Acquire HE-LTF CSI from 802.11ax HE20 SU (Single-User) packets
+               // Enabled for WiFi 6 support (if router supports 802.11ax)
 
-        .acquire_csi_mu = 0,            // Acquire HE-LTF CSI from 802.11ax HE20 MU (Multi-User) packets
-                                        // Disabled (not using WiFi 6 MU-MIMO)
+        .acquire_csi_mu =
+            0, // Acquire HE-LTF CSI from 802.11ax HE20 MU (Multi-User) packets
+               // Disabled (not using WiFi 6 MU-MIMO)
 
-        .acquire_csi_dcm = 0,           // Acquire CSI from DCM (Dual Carrier Modulation) packets
-                                        // DCM is a WiFi 6 feature for long-range transmission
-                                        // Disabled (not commonly used)
+        .acquire_csi_dcm = 0, // Acquire CSI from DCM (Dual Carrier Modulation)
+                              // packets DCM is a WiFi 6 feature for long-range
+                              // transmission Disabled (not commonly used)
 
-        .acquire_csi_beamformed = 0,    // Acquire CSI from beamformed packets
-                                        // Beamforming directs signal toward receiver
-                                        // Disabled (not needed for general CSI capture)
+        .acquire_csi_beamformed =
+            0, // Acquire CSI from beamformed packets
+               // Beamforming directs signal toward receiver
+               // Disabled (not needed for general CSI capture)
 
-        .acquire_csi_he_stbc = 0,       // Acquire CSI from 802.11ax HE STBC packets
-                                        // STBC improves reliability using multiple antennas
-                                        // Disabled (not commonly used)
+        .acquire_csi_he_stbc = 0, // Acquire CSI from 802.11ax HE STBC packets
+                                  // STBC improves reliability using multiple
+                                  // antennas Disabled (not commonly used)
 
-        .val_scale_cfg = 0,             // CSI value scaling configuration (0-8)
-                                        // 0 = automatic scaling (recommended)
-                                        // 1-8 = manual scaling with shift bits
-                                        // Controls normalization of CSI amplitude values
+        .val_scale_cfg = 0, // CSI value scaling configuration (0-8)
+                            // 0 = automatic scaling (recommended)
+                            // 1-8 = manual scaling with shift bits
+                            // Controls normalization of CSI amplitude values
 
-        .dump_ack_en = 0,               // Enable capture of 802.11 ACK frames
-                                        // Disabled to reduce overhead (ACK frames not needed)
+        .dump_ack_en = 0, // Enable capture of 802.11 ACK frames
+                          // Disabled to reduce overhead (ACK frames not needed)
     };
     #elif CONFIG_IDF_TARGET_ESP32C5
     // ESP32-C5: WiFi 6 config without HE STBC field
     // Note: ESP32-C5 has a slightly different wifi_csi_acquire_config_t structure
     wifi_csi_config_t csi_config = {
-        .enable = 1,                    // Master enable for CSI acquisition (REQUIRED)
+        .enable = 1, // Master enable for CSI acquisition (REQUIRED)
 
-        .acquire_csi_legacy = 1,        // Acquire L-LTF CSI from legacy 802.11a/g packets
-                                        // CRITICAL: Required for CSI callback to be invoked!
+        .acquire_csi_legacy =
+            1, // Acquire L-LTF CSI from legacy 802.11a/g packets
+               // CRITICAL: Required for CSI callback to be invoked!
 
-        .acquire_csi_ht20 = 1,          // Acquire HT-LTF CSI from 802.11n HT20 packets
-                                        // CRITICAL: Required for CSI from HT packets!
+        .acquire_csi_ht20 = 1, // Acquire HT-LTF CSI from 802.11n HT20 packets
+                               // CRITICAL: Required for CSI from HT packets!
 
-        .acquire_csi_ht40 = 0,          // Acquire HT-LTF CSI from 802.11n HT40 packets (40MHz bandwidth)
-                                        // Disabled (using HT20 for stability)
+        .acquire_csi_ht40 =
+            0, // Acquire HT-LTF CSI from 802.11n HT40 packets (40MHz bandwidth)
+               // Disabled (using HT20 for stability)
 
-        .acquire_csi_su = 1,            // Acquire HE-LTF CSI from 802.11ax HE20 SU (Single-User) packets
-                                        // Enabled for WiFi 6 support
+        .acquire_csi_su = 1, // Acquire HE-LTF CSI from 802.11ax HE20 SU
+                             // (Single-User) packets Enabled for WiFi 6 support
 
-        .acquire_csi_mu = 0,            // Acquire HE-LTF CSI from 802.11ax HE20 MU (Multi-User) packets
-                                        // Disabled (not using WiFi 6 MU-MIMO)
+        .acquire_csi_mu =
+            0, // Acquire HE-LTF CSI from 802.11ax HE20 MU (Multi-User) packets
+               // Disabled (not using WiFi 6 MU-MIMO)
 
-        .acquire_csi_dcm = 0,           // Acquire CSI from DCM (Dual Carrier Modulation) packets
-                                        // Disabled (not commonly used)
+        .acquire_csi_dcm = 0, // Acquire CSI from DCM (Dual Carrier Modulation)
+                              // packets Disabled (not commonly used)
 
-        .acquire_csi_beamformed = 0,    // Acquire CSI from beamformed packets
-                                        // Disabled (not needed for general CSI capture)
+        .acquire_csi_beamformed =
+            0, // Acquire CSI from beamformed packets
+               // Disabled (not needed for general CSI capture)
 
         // Note: acquire_csi_he_stbc field not available on ESP32-C5
 
-        .val_scale_cfg = 0,             // CSI value scaling configuration (0-8)
-                                        // 0 = automatic scaling (recommended)
+        .val_scale_cfg = 0, // CSI value scaling configuration (0-8)
+                            // 0 = automatic scaling (recommended)
 
-        .dump_ack_en = 0,               // Enable capture of 802.11 ACK frames
-                                        // Disabled to reduce overhead
+        .dump_ack_en = 0, // Enable capture of 802.11 ACK frames
+                          // Disabled to reduce overhead
     };
     #else
     // ESP32, ESP32-S2, ESP32-S3, ESP32-C3 use legacy CSI API with LTF fields
     wifi_csi_config_t csi_config = {
-        .lltf_en = g_csi_state.config.lltf_en,           // Enable Legacy Long Training Field (L-LTF) CSI capture
-                                                         // L-LTF is present in all 802.11a/g packets
-                                                         // Provides base channel estimation (64 subcarriers)
+        .lltf_en =
+            g_csi_state.config
+            .lltf_en,   // Enable Legacy Long Training Field (L-LTF) CSI capture
+                        // L-LTF is present in all 802.11a/g packets
+                        // Provides base channel estimation (64 subcarriers)
 
-        .htltf_en = g_csi_state.config.htltf_en,         // Enable HT Long Training Field (HT-LTF) CSI capture
-                                                         // HT-LTF is present in 802.11n (HT) packets
-                                                         // Provides improved channel estimation for MIMO
+        .htltf_en =
+            g_csi_state.config
+            .htltf_en,   // Enable HT Long Training Field (HT-LTF) CSI capture
+                         // HT-LTF is present in 802.11n (HT) packets
+                         // Provides improved channel estimation for MIMO
 
-        .stbc_htltf2_en = g_csi_state.config.stbc_htltf2_en,  // Enable Space-Time Block Code HT-LTF2 capture
-                                                              // STBC uses 2 antennas to improve reliability
-                                                              // Captures second HT-LTF when STBC is active
+        .stbc_htltf2_en =
+            g_csi_state.config
+            .stbc_htltf2_en,   // Enable Space-Time Block Code HT-LTF2 capture
+                               // STBC uses 2 antennas to improve reliability
+                               // Captures second HT-LTF when STBC is active
 
-        .ltf_merge_en = g_csi_state.config.ltf_merge_en,      // Merge L-LTF and HT-LTF data by averaging
-                                                              // true: Average L-LTF and HT-LTF for HT packets (more stable)
-                                                              // false: Use only HT-LTF for HT packets (more precise)
+        .ltf_merge_en =
+            g_csi_state.config
+            .ltf_merge_en,   // Merge L-LTF and HT-LTF data by averaging
+                             // true: Average L-LTF and HT-LTF for HT packets
+                             // (more stable) false: Use only HT-LTF for HT
+                             // packets (more precise)
 
-        .channel_filter_en = g_csi_state.config.channel_filter_en,  // Channel filter to smooth adjacent subcarriers
-                                                                    // true: Filter/smooth adjacent subcarriers (52 useful)
-                                                                    // false: Keep subcarrier independence (64 total)
+        .channel_filter_en =
+            g_csi_state.config
+            .channel_filter_en,   // Channel filter to smooth adjacent
+                                  // subcarriers true: Filter/smooth adjacent
+                                  // subcarriers (52 useful) false: Keep
+                                  // subcarrier independence (64 total)
 
-        .manu_scale = g_csi_state.config.manu_scale,     // Manual vs automatic CSI data scaling
-                                                         // false: Auto-scaling (recommended, adapts dynamically)
-                                                         // true: Manual scaling (requires .shift parameter)
+        .manu_scale =
+            g_csi_state.config.manu_scale, // Manual vs automatic CSI data scaling
+                                           // false: Auto-scaling (recommended,
+                                           // adapts dynamically) true: Manual
+                                           // scaling (requires .shift parameter)
 
-        .shift = g_csi_state.config.shift,               // Shift value for manual scaling (0-15)
-                                                         // Only used when manu_scale = true
+        .shift =
+            g_csi_state.config.shift, // Shift value for manual scaling (0-15)
+                                      // Only used when manu_scale = true
 
-        .dump_ack_en = false,                             // Enable capture of 802.11 ACK frames
-                                                          // Disabled to reduce overhead
+        .dump_ack_en = false, // Enable capture of 802.11 ACK frames
+                              // Disabled to reduce overhead
     };
     #endif
 
@@ -474,44 +507,21 @@ esp_err_t wifi_csi_disable(void) {
         return ret;
     }
 
-    // Disable promiscuous mode (optional - may be used by other parts of the system)
-    // Only disable if we're sure nothing else needs it
-    // esp_wifi_set_promiscuous(false);
+    // Clean up: deallocate buffer and reset config to defaults
+    csi_buffer_deinit(&g_csi_state.buffer);
+
+    // Reset config to defaults
+    g_csi_state.config.lltf_en = true;
+    g_csi_state.config.htltf_en = true;
+    g_csi_state.config.stbc_htltf2_en = true;
+    g_csi_state.config.ltf_merge_en = true;
+    g_csi_state.config.channel_filter_en = true;
+    g_csi_state.config.manu_scale = false;
+    g_csi_state.config.shift = 0;
+    g_csi_state.config.buffer_size = CSI_DEFAULT_BUFFER_SIZE;
 
     g_csi_state.enabled = false;
-    ESP_LOGI(TAG, "CSI disabled");
-    return ESP_OK;
-}
-
-esp_err_t wifi_csi_config(const csi_config_t *config) {
-    if (config == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    // Update configuration
-    memcpy(&g_csi_state.config, config, sizeof(csi_config_t));
-
-    // Reinitialize buffer if size changed
-    if (config->buffer_size != g_csi_state.buffer.size) {
-        bool was_enabled = g_csi_state.enabled;
-
-        if (was_enabled) {
-            wifi_csi_disable();
-        }
-
-        csi_buffer_deinit(&g_csi_state.buffer);
-        if (!csi_buffer_init(&g_csi_state.buffer, config->buffer_size)) {
-            return ESP_ERR_NO_MEM;
-        }
-
-        if (was_enabled) {
-            return wifi_csi_enable();
-        }
-    } else if (g_csi_state.enabled) {
-        // If already enabled, update configuration
-        return wifi_csi_enable();
-    }
-
+    ESP_LOGI(TAG, "CSI disabled and state cleaned");
     return ESP_OK;
 }
 
@@ -523,72 +533,85 @@ bool wifi_csi_read_frame(csi_frame_t *frame) {
 // MicroPython Bindings
 // ============================================================================
 
-// wifi.csi.enable()
-STATIC mp_obj_t wifi_csi_enable_py(mp_obj_t self_in) {
+// wlan.csi_enable(**kwargs)
+STATIC mp_obj_t network_wlan_csi_enable(size_t n_args, const mp_obj_t *args,
+    mp_map_t *kw_args) {
+    (void)args[0]; // WLAN object not used, CSI is global state
+
+    enum {
+        ARG_lltf_en,
+        ARG_htltf_en,
+        ARG_stbc_htltf2_en,
+        ARG_ltf_merge_en,
+        ARG_channel_filter_en,
+        ARG_manu_scale,
+        ARG_shift,
+        ARG_buffer_size
+    };
+    static const mp_arg_t allowed_args[] = {
+        {MP_QSTR_lltf_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true}},
+        {MP_QSTR_htltf_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true}},
+        {MP_QSTR_stbc_htltf2_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true}},
+        {MP_QSTR_ltf_merge_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true}},
+        {MP_QSTR_channel_filter_en,
+         MP_ARG_KW_ONLY | MP_ARG_BOOL,
+         {.u_bool = true}},
+        {MP_QSTR_manu_scale, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false}},
+        {MP_QSTR_shift, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0}},
+        {MP_QSTR_buffer_size,
+         MP_ARG_KW_ONLY | MP_ARG_INT,
+         {.u_int = CSI_DEFAULT_BUFFER_SIZE}},
+    };
+
+    mp_arg_val_t parsed_args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args - 1, args + 1, kw_args, MP_ARRAY_SIZE(allowed_args),
+        allowed_args, parsed_args);
+
+    // Update configuration with provided parameters
+    g_csi_state.config.lltf_en = parsed_args[ARG_lltf_en].u_bool;
+    g_csi_state.config.htltf_en = parsed_args[ARG_htltf_en].u_bool;
+    g_csi_state.config.stbc_htltf2_en = parsed_args[ARG_stbc_htltf2_en].u_bool;
+    g_csi_state.config.ltf_merge_en = parsed_args[ARG_ltf_merge_en].u_bool;
+    g_csi_state.config.channel_filter_en =
+        parsed_args[ARG_channel_filter_en].u_bool;
+    g_csi_state.config.manu_scale = parsed_args[ARG_manu_scale].u_bool;
+    g_csi_state.config.shift =
+        parsed_args[ARG_shift].u_int & 0x0F; // Limit to 0-15
+    g_csi_state.config.buffer_size = parsed_args[ARG_buffer_size].u_int;
+
+    if (g_csi_state.config.buffer_size < 1 ||
+        g_csi_state.config.buffer_size > 1024) {
+        mp_raise_ValueError(
+            MP_ERROR_TEXT("buffer_size must be between 1 and 1024"));
+    }
+
+    // Enable CSI with the configuration
     esp_err_t ret = wifi_csi_enable();
     if (ret != ESP_OK) {
         mp_raise_OSError(ret);
     }
+
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(wifi_csi_enable_obj, wifi_csi_enable_py);
+MP_DEFINE_CONST_FUN_OBJ_KW(network_wlan_csi_enable_obj, 1,
+    network_wlan_csi_enable);
 
-// wifi.csi.disable()
-STATIC mp_obj_t wifi_csi_disable_py(mp_obj_t self_in) {
+// wlan.csi_disable()
+STATIC mp_obj_t network_wlan_csi_disable(mp_obj_t self_in) {
+    (void)self_in; // WLAN object not used, CSI is global state
     esp_err_t ret = wifi_csi_disable();
     if (ret != ESP_OK) {
         mp_raise_OSError(ret);
     }
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(wifi_csi_disable_obj, wifi_csi_disable_py);
+MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_disable_obj,
+    network_wlan_csi_disable);
 
-// wifi.csi.config(**kwargs)
-STATIC mp_obj_t wifi_csi_config_obj(size_t n_args, const mp_obj_t *args, mp_map_t *kw_args) {
-    enum {
-        ARG_lltf_en, ARG_htltf_en, ARG_stbc_htltf2_en, ARG_ltf_merge_en,
-        ARG_channel_filter_en, ARG_manu_scale, ARG_shift, ARG_buffer_size
-    };
-    static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_lltf_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
-        { MP_QSTR_htltf_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
-        { MP_QSTR_stbc_htltf2_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
-        { MP_QSTR_ltf_merge_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
-        { MP_QSTR_channel_filter_en, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
-        { MP_QSTR_manu_scale, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
-        { MP_QSTR_shift, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
-        { MP_QSTR_buffer_size, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = CSI_DEFAULT_BUFFER_SIZE} },
-    };
+// wlan.csi_read() -> dict or None
+STATIC mp_obj_t network_wlan_csi_read(mp_obj_t self_in) {
+    (void)self_in; // WLAN object not used, CSI is global state
 
-    mp_arg_val_t parsed_args[MP_ARRAY_SIZE(allowed_args)];
-    mp_arg_parse_all(n_args - 1, args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, parsed_args);
-
-    csi_config_t config = g_csi_state.config;
-
-    config.lltf_en = parsed_args[ARG_lltf_en].u_bool;
-    config.htltf_en = parsed_args[ARG_htltf_en].u_bool;
-    config.stbc_htltf2_en = parsed_args[ARG_stbc_htltf2_en].u_bool;
-    config.ltf_merge_en = parsed_args[ARG_ltf_merge_en].u_bool;
-    config.channel_filter_en = parsed_args[ARG_channel_filter_en].u_bool;
-    config.manu_scale = parsed_args[ARG_manu_scale].u_bool;
-    config.shift = parsed_args[ARG_shift].u_int & 0x0F; // Limit to 0-15
-    config.buffer_size = parsed_args[ARG_buffer_size].u_int;
-
-    if (config.buffer_size < 1 || config.buffer_size > 1024) {
-        mp_raise_ValueError(MP_ERROR_TEXT("buffer_size must be between 1 and 1024"));
-    }
-
-    esp_err_t ret = wifi_csi_config(&config);
-    if (ret != ESP_OK) {
-        mp_raise_OSError(ret);
-    }
-
-    return mp_const_none;
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_KW(wifi_csi_config_obj_obj, 1, wifi_csi_config_obj);
-
-// wifi.csi.read() -> dict or None
-STATIC mp_obj_t wifi_csi_read_obj(mp_obj_t self_in) {
     csi_frame_t frame;
 
     if (!wifi_csi_read_frame(&frame)) {
@@ -599,48 +622,72 @@ STATIC mp_obj_t wifi_csi_read_obj(mp_obj_t self_in) {
     mp_obj_t dict = mp_obj_new_dict(20);
 
     // Add metadata
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_rssi), mp_obj_new_int(frame.rssi));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_rate), mp_obj_new_int(frame.rate));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_sig_mode), mp_obj_new_int(frame.sig_mode));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_mcs), mp_obj_new_int(frame.mcs));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_cwb), mp_obj_new_int(frame.cwb));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_smoothing), mp_obj_new_int(frame.smoothing));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_not_sounding), mp_obj_new_int(frame.not_sounding));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_aggregation), mp_obj_new_int(frame.aggregation));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_stbc), mp_obj_new_int(frame.stbc));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_fec_coding), mp_obj_new_int(frame.fec_coding));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_sgi), mp_obj_new_int(frame.sgi));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_noise_floor), mp_obj_new_int(frame.noise_floor));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_ampdu_cnt), mp_obj_new_int(frame.ampdu_cnt));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_channel), mp_obj_new_int(frame.channel));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_secondary_channel), mp_obj_new_int(frame.secondary_channel));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_timestamp), mp_obj_new_int(frame.timestamp_us));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_local_timestamp), mp_obj_new_int(frame.local_timestamp));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_ant), mp_obj_new_int(frame.ant));
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_sig_len), mp_obj_new_int(frame.sig_len));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_rssi),
+        mp_obj_new_int(frame.rssi));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_rate),
+        mp_obj_new_int(frame.rate));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_sig_mode),
+        mp_obj_new_int(frame.sig_mode));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_mcs),
+        mp_obj_new_int(frame.mcs));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_cwb),
+        mp_obj_new_int(frame.cwb));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_smoothing),
+        mp_obj_new_int(frame.smoothing));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_not_sounding),
+        mp_obj_new_int(frame.not_sounding));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_aggregation),
+        mp_obj_new_int(frame.aggregation));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_stbc),
+        mp_obj_new_int(frame.stbc));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_fec_coding),
+        mp_obj_new_int(frame.fec_coding));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_sgi),
+        mp_obj_new_int(frame.sgi));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_noise_floor),
+        mp_obj_new_int(frame.noise_floor));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_ampdu_cnt),
+        mp_obj_new_int(frame.ampdu_cnt));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_channel),
+        mp_obj_new_int(frame.channel));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_secondary_channel),
+        mp_obj_new_int(frame.secondary_channel));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_timestamp),
+        mp_obj_new_int(frame.timestamp_us));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_local_timestamp),
+        mp_obj_new_int(frame.local_timestamp));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_ant),
+        mp_obj_new_int(frame.ant));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_sig_len),
+        mp_obj_new_int(frame.sig_len));
 
     // MAC address as bytes
     mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_mac),
         mp_obj_new_bytes(frame.mac, 6));
 
     // CSI data as array('b') - int8_t values matching ESP-IDF API
-    mp_obj_array_t *csi_array = MP_OBJ_TO_PTR(mp_obj_new_bytearray_by_ref(
-        frame.len, frame.data));
+    mp_obj_array_t *csi_array =
+        MP_OBJ_TO_PTR(mp_obj_new_bytearray_by_ref(frame.len, frame.data));
     csi_array->typecode = 'b';
-    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_data), MP_OBJ_FROM_PTR(csi_array));
+    mp_obj_dict_store(dict, MP_OBJ_NEW_QSTR(MP_QSTR_data),
+        MP_OBJ_FROM_PTR(csi_array));
 
     return dict;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(wifi_csi_read_obj_obj, wifi_csi_read_obj);
+MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_read_obj, network_wlan_csi_read);
 
-// wifi.csi.dropped() -> int
-STATIC mp_obj_t wifi_csi_dropped_obj(mp_obj_t self_in) {
+// wlan.csi_dropped() -> int
+STATIC mp_obj_t network_wlan_csi_dropped(mp_obj_t self_in) {
+    (void)self_in; // WLAN object not used, CSI is global state
     return mp_obj_new_int(g_csi_state.buffer.dropped);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(wifi_csi_dropped_obj_obj, wifi_csi_dropped_obj);
+MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_dropped_obj,
+    network_wlan_csi_dropped);
 
-// wifi.csi.available() -> int
-STATIC mp_obj_t wifi_csi_available_obj(mp_obj_t self_in) {
+// wlan.csi_available() -> int
+STATIC mp_obj_t network_wlan_csi_available(mp_obj_t self_in) {
+    (void)self_in; // WLAN object not used, CSI is global state
+
     if (!g_csi_state.buffer.initialized) {
         return mp_obj_new_int(0);
     }
@@ -652,28 +699,7 @@ STATIC mp_obj_t wifi_csi_available_obj(mp_obj_t self_in) {
     uint32_t available = (head >= tail) ? (head - tail) : (size - tail + head);
     return mp_obj_new_int(available);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(wifi_csi_available_obj_obj, wifi_csi_available_obj);
-
-// Local dictionary for CSI object
-STATIC const mp_rom_map_elem_t wifi_csi_locals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_enable), MP_ROM_PTR(&wifi_csi_enable_obj) },
-    { MP_ROM_QSTR(MP_QSTR_disable), MP_ROM_PTR(&wifi_csi_disable_obj) },
-    { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&wifi_csi_config_obj_obj) },
-    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&wifi_csi_read_obj_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dropped), MP_ROM_PTR(&wifi_csi_dropped_obj_obj) },
-    { MP_ROM_QSTR(MP_QSTR_available), MP_ROM_PTR(&wifi_csi_available_obj_obj) },
-};
-STATIC MP_DEFINE_CONST_DICT(wifi_csi_locals_dict, wifi_csi_locals_dict_table);
-
-// CSI type definition
-MP_DEFINE_CONST_OBJ_TYPE(
-    wifi_csi_type,
-    MP_QSTR_CSI,
-    MP_TYPE_FLAG_NONE,
-    locals_dict, &wifi_csi_locals_dict
-    );
-
-// CSI singleton instance
-const mp_obj_base_t wifi_csi_singleton = { &wifi_csi_type };
+MP_DEFINE_CONST_FUN_OBJ_1(network_wlan_csi_available_obj,
+    network_wlan_csi_available);
 
 #endif // MICROPY_PY_NETWORK_WLAN_CSI

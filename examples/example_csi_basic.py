@@ -57,20 +57,10 @@ def main():
     # Configure CSI - use minimal config for ESP32-C6 compatibility
     print("Configuring CSI...")
     try:
-        wlan.csi.config(buffer_size=64)
-        print("CSI configured (minimal config)")
+        wlan.csi_enable(buffer_size=64)
+        print("CSI configured and enabled")
     except Exception as e:
-        print("Error configuring CSI: " + str(e))
-        return
-    
-    # Enable CSI
-    print("Enabling CSI...")
-    try:
-        wlan.csi.enable()
-        print("CSI enabled successfully!")
-    except OSError as e:
-        print("ERROR: Failed to enable CSI")
-        print("Error code: " + str(e))
+        print("Error configuring and enabling CSI: " + str(e))
         return
     print("CSI enabled - waiting for frames...")
     print()
@@ -80,7 +70,7 @@ def main():
     try:
         while True:
             # Read CSI frame (non-blocking)
-            frame = wlan.csi.read()
+            frame = wlan.csi_read()
             
             if frame:
                 frame_count += 1
@@ -98,8 +88,8 @@ def main():
                 print("  Timestamp: " + str(frame['timestamp']) + " µs")
                 
                 # Show buffer status
-                available = wlan.csi.available()
-                dropped = wlan.csi.dropped()
+                available = wlan.csi_available()
+                dropped = wlan.csi_dropped()
                 print("  Buffer:    " + str(available) + " available, " + str(dropped) + " dropped")
                 print()
                 
@@ -112,9 +102,9 @@ def main():
     
     finally:
         # Cleanup
-        wlan.csi.disable()
+        wlan.csi_disable()
         print("\nTotal frames captured: " + str(frame_count))
-        print("Total frames dropped: " + str(wlan.csi.dropped()))
+        print("Total frames dropped: " + str(wlan.csi_dropped()))
         print("CSI disabled")
 
 if __name__ == "__main__":

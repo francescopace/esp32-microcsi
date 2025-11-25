@@ -119,20 +119,10 @@ def main():
     print("Waiting for WiFi to stabilize...")
     time.sleep(2)
     
-    # Configure CSI - use minimal config for ESP32-C6 compatibility
-    # Note: LTF parameters are ignored on ESP32-C6 but may cause issues
-    print("Configuring CSI...")
-    try:
-        wlan.csi.config(buffer_size=64)
-        print("CSI configured (minimal config)")
-    except Exception as e:
-        print("Error configuring CSI: " + str(e))
-        return
-    
-    # Enable CSI
+    # Enable CSI with configuration
     print("Enabling CSI...")
     try:
-        wlan.csi.enable()
+        wlan.csi_enable(buffer_size=64)
         print("CSI enabled successfully!")
     except OSError as e:
         print("ERROR: Failed to enable CSI")
@@ -164,7 +154,7 @@ def main():
     
     try:
         while True:
-            frame = wlan.csi.read()
+            frame = wlan.csi_read()
             
             if frame:
                 frame_count += 1
@@ -200,8 +190,8 @@ def main():
                         print()
                         
                         # Buffer statistics
-                        available = wlan.csi.available()
-                        dropped = wlan.csi.dropped()
+                        available = wlan.csi_available()
+                        dropped = wlan.csi_dropped()
                         print("    Buffer status:     " + str(available) + " available, " + str(dropped) + " dropped")
                         
                         # Throughput
@@ -219,7 +209,7 @@ def main():
     
     finally:
         # Cleanup and final statistics
-        wlan.csi.disable()
+        wlan.csi_disable()
         
         elapsed = time.ticks_diff(time.ticks_ms(), start_time) / 1000.0
         
@@ -228,7 +218,7 @@ def main():
         print("Final Statistics:")
         print("=" * 60)
         print("Total frames captured: " + str(frame_count))
-        print("Total frames dropped:  " + str(wlan.csi.dropped()))
+        print("Total frames dropped:  " + str(wlan.csi_dropped()))
         print("Elapsed time:          %.2f seconds" % elapsed)
         if elapsed > 0:
             print("Average throughput:    %.2f frames/sec" % (frame_count/elapsed))

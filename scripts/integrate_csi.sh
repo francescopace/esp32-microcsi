@@ -161,11 +161,15 @@ else
 #endif
 ' "${ESP32_DIR}/network_wlan.c"
     
-    # Add CSI singleton to WLAN locals dict (after ipconfig, before constants section)
-    sed -i '' '/{ MP_ROM_QSTR(MP_QSTR_ipconfig), MP_ROM_PTR(&esp_nic_ipconfig_obj) },/a\
+    # Add CSI methods to WLAN locals dict (after ipconfig, before constants section)
+    sed -i '' '/{ MP_ROM_QSTR(MP_QSTR_ipconfig), MP_ROM_PTR(\&esp_nic_ipconfig_obj) },/a\
 \
 #if MICROPY_PY_NETWORK_WLAN_CSI\
-    { MP_ROM_QSTR(MP_QSTR_csi), MP_ROM_PTR(\&wifi_csi_singleton) },\
+    { MP_ROM_QSTR(MP_QSTR_csi_enable), MP_ROM_PTR(\&network_wlan_csi_enable_obj) },\
+    { MP_ROM_QSTR(MP_QSTR_csi_disable), MP_ROM_PTR(\&network_wlan_csi_disable_obj) },\
+    { MP_ROM_QSTR(MP_QSTR_csi_read), MP_ROM_PTR(\&network_wlan_csi_read_obj) },\
+    { MP_ROM_QSTR(MP_QSTR_csi_dropped), MP_ROM_PTR(\&network_wlan_csi_dropped_obj) },\
+    { MP_ROM_QSTR(MP_QSTR_csi_available), MP_ROM_PTR(\&network_wlan_csi_available_obj) },\
 #endif
 ' "${ESP32_DIR}/network_wlan.c"
     echo -e "${GREEN}✓ network_wlan.c patched${NC}"
